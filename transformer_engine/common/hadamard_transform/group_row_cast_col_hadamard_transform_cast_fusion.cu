@@ -21,6 +21,7 @@
 #include "common/util/cuda_runtime.h"
 #include "common/util/curanddx.hpp"
 #include "common/util/ptx.cuh"
+#include "common/util/system.h"
 #include "common/utils.cuh"
 #include "customized_pipeline.cuh"
 #include "cutlass/arch/barrier.h"
@@ -107,6 +108,14 @@ cutlass::Array<cutlass::float_e2m1_t, 8> StochasticNumericConverterBase(
   return output;
 }
 
+// Atomic max for a non-negative float. Valid only when both the stored value
+// and the candidate are >= 0 (IEEE-754 positive floats are monotonic in their
+// bit pattern interpreted as unsigned int). NaNs will propagate as very large
+// unsigned values, which matches the desired behavior for amax.
+__device__ __forceinline__ void atomicMaxFloatNonNeg(float* addr, float val) {
+  atomicMax(reinterpret_cast<unsigned int*>(addr), __float_as_uint(val));
+}
+
 CUTLASS_DEVICE
 cutlass::Array<cutlass::float_e2m1_t, 16> StochasticNumericConverter(
     cutlass::Array<float, 16> const &input, cutlass::Array<uint32_t, 4> const &rbits) {
@@ -173,7 +182,7 @@ template <class MShape, class NShape, class KShape, class ClusterShape, class Cl
           int AccumulatorPipelineStageCount_, int SchedulerPipelineStageCount_,
           bool kEnableStochasticRounding_ = false, bool kEnableRHTColQuant_ = true,
           bool kEnableRowQuant_ = true, bool kEnableSwizzleSFOutput_ = false,
-          bool kUseFastMath_ = false>
+          bool kUseFastMath_ = false, bool kAmaxOnly_ = false>
 __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
     MShape M, NShape packed_N, KShape K, ClusterShape cluster_shape, ClusterTileShape cluster_tile,
     TA const *A, AStride dA, ASmemLayout sAlayout, CUTE_GRID_CONSTANT TmaLoadA const tma_load_a,
@@ -208,6 +217,11 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
     static constexpr bool kEnableRowQuant = kEnableRowQuant_;
     static constexpr bool kEnableSwizzleSFOutput = kEnableSwizzleSFOutput_;
     static constexpr bool kUseFastMath = kUseFastMath_;
+    // When true, this kernel is launched cooperatively with an initial
+    // amax-only pass over the tensor followed by a grid-wide sync and a
+    // normal quantization pass. The global amax buffers are also zeroed
+    // by the kernel itself before the amax pass. See phase 0/1/2 below.
+    static constexpr bool kAmaxOnly = kAmaxOnly_;
 
     // Constant for RHT tensor processing (tile size etc)
     static int constexpr RhtTensorSize = 16;
@@ -679,11 +693,19 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
         bulk_tmem_epilogue.data() = tmem_base_ptr;
         int global_thread_idx = threadIdx.x;
         int local_thread_idx = global_thread_idx % cutlass::NumThreadsPerWarpGroup;
-        // g2s load all global_d_amax
+        // g2s load all global_d_amax. The amax-only launch doesn't consume
+        // these values, so skip the __ldg path entirely and seed the smem
+        // with 0 -- this also keeps downstream scale computation well
+        // defined (its result is unused in the amax-only launch).
         CUTLASS_PRAGMA_NO_UNROLL
-        for (int g = local_thread_idx; g < args.num_tensors; g += NumEpilogueColQuantThreadCount) {
-          shared_storage.global_d_amax[g] =
-              __ldg(reinterpret_cast<float *>(args.global_d_amax_list[g]));
+        for (int g = local_thread_idx; g < args.num_tensors;
+             g += NumEpilogueColQuantThreadCount) {
+          if constexpr (kAmaxOnly) {
+            shared_storage.global_d_amax[g] = 0.0f;
+          } else {
+            shared_storage.global_d_amax[g] =
+                __ldg(reinterpret_cast<float *>(args.global_d_amax_list[g]));
+          }
         }
 
         size_t rng_seed = 0;
@@ -854,6 +876,29 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
               vec_maxs[v] = amax_reduction(ElementAccumulator(0), compute_frgs[v]);
             }
 
+            // Amax-only launch: reduce vec_maxs across the warp and push
+            // the tile-local maximum into the group's global amax via
+            // atomicMax. The quantization launch will consume this value
+            // and do the actual scale/cast/store.
+            if constexpr (kAmaxOnly) {
+              ElementAccumulator tile_amax = ElementAccumulator(0);
+              CUTLASS_PRAGMA_UNROLL
+              for (int v = 0; v < NumVecs; v++) {
+                tile_amax = fmaxf(tile_amax, vec_maxs[v]);
+              }
+              CUTLASS_PRAGMA_UNROLL
+              for (int off = 16; off > 0; off >>= 1) {
+                tile_amax =
+                    fmaxf(tile_amax, __shfl_xor_sync(0xFFFFFFFFu, tile_amax, off));
+              }
+              if ((local_thread_idx & 31) == 0 && tile_amax > 0.0f) {
+                float *d_ptr =
+                    reinterpret_cast<float *>(args.global_d_amax_list[group_idx]);
+                if (d_ptr != nullptr) atomicMaxFloatNonNeg(d_ptr, tile_amax);
+              }
+              continue;
+            }
+
             pvscales = cutlass::multiplies<cutlass::Array<ElementAccumulator, NumVecs>>{}(
                 vec_maxs, global_encode_scale_multiplier);
             auto pvscales_cvted =
@@ -923,11 +968,18 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
         int local_thread_idx = global_thread_idx % 256;
         size_t rng_seed = 0;
         size_t rng_offset = 0;
-        // g2s load all global_a_amax for all groups/tensors
+        // g2s load all global_a_amax for all groups/tensors. See the
+        // corresponding comment in the col-quant warp for why the amax-only
+        // launch seeds the smem slot with 0 instead of issuing __ldg.
         CUTLASS_PRAGMA_NO_UNROLL
-        for (int g = local_thread_idx; g < args.num_tensors; g += NumEpilogueRowQuantThreadCount) {
-          shared_storage.global_a_amax[g] =
-              __ldg(reinterpret_cast<float *>(args.global_a_amax_list[g]));
+        for (int g = local_thread_idx; g < args.num_tensors;
+             g += NumEpilogueRowQuantThreadCount) {
+          if constexpr (kAmaxOnly) {
+            shared_storage.global_a_amax[g] = 0.0f;
+          } else {
+            shared_storage.global_a_amax[g] =
+                __ldg(reinterpret_cast<float *>(args.global_a_amax_list[g]));
+          }
         }
         // RNG for stochastic rounding
         if constexpr (kEnableStochasticRounding) {
@@ -1051,6 +1103,9 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
                   cutlass::NumericArrayConverter<ElementAccumulator, TA, VectorSize>{}(
                       compute_frgs[v]);
               amax_view(_0{}, v) = amax_reduction(ElementAccumulator(0), compute_frgs_up);
+              // Amax-only launch: per-block amax is all we need. Skip the
+              // rest of the per-v quantization work.
+              if constexpr (kAmaxOnly) continue;
               pvscales_view(_0{}, v) = cutlass::multiplies<ElementAccumulator>{}(
                   amax_view(_0{}, v), global_encode_scale_multiplier);
               filter(tQArSFA)(v) = sfa_converter(pvscales_view(_0{}, v));
@@ -1083,8 +1138,30 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
                             compute_frgs_up, acc_scale));
               }
             }
-            copy(tiled_r2g_QA, tQArQA, tQAgQA_mn);
-            copy(tiled_r2g_SFA, filter(tQArSFA), filter(tQAgSFA_mn));
+            if constexpr (kAmaxOnly) {
+              // Reduce per-block amax values (stored in `amax`) down to a
+              // single tile-level amax, then warp-reduce and atomically
+              // update the group's global amax. Skip the gmem stores.
+              ElementAccumulator tile_amax_a = ElementAccumulator(0);
+              auto amax_view = group_modes<1, rank(amax)>(amax);
+              CUTLASS_PRAGMA_UNROLL
+              for (int v = 0; v < size<1>(group_modes<1, rank(tQArA)>(tQArA)); v++) {
+                tile_amax_a = fmaxf(tile_amax_a, amax_view(_0{}, v));
+              }
+              CUTLASS_PRAGMA_UNROLL
+              for (int off = 16; off > 0; off >>= 1) {
+                tile_amax_a =
+                    fmaxf(tile_amax_a, __shfl_xor_sync(0xFFFFFFFFu, tile_amax_a, off));
+              }
+              if ((local_thread_idx & 31) == 0 && tile_amax_a > 0.0f) {
+                float *a_ptr =
+                    reinterpret_cast<float *>(args.global_a_amax_list[group_idx]);
+                if (a_ptr != nullptr) atomicMaxFloatNonNeg(a_ptr, tile_amax_a);
+              }
+            } else {
+              copy(tiled_r2g_QA, tQArQA, tQAgQA_mn);
+              copy(tiled_r2g_SFA, filter(tQArSFA), filter(tQAgSFA_mn));
+            }
           }
           // scheduler.advance();
           scheduler.fetch_next_work(sched_pipeline, sched_pipeline_consumer_state);
@@ -1096,12 +1173,13 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
     } else {
       cutlass::arch::warpgroup_reg_dealloc<32>();
     }
+
   }  // sm100 compile guard end
 }  // NOLINT(readability/fn_size)
 
 template <bool kEnableStochasticRounding, bool kEnableRHTColQuant, bool kEnableRowQuant,
           bool kEnableSwizzleSFOutput, class TA, class TB, class TQA, class TSFA, class TD = TQA,
-          class TSFD = TSFA, bool kUseFastMath = false>
+          class TSFD = TSFA, bool kUseFastMath = false, bool kFuseAmax = false>
 void group_row_col_rht_gemm_ntt_w_sfc(int packed_sequence_length, int hidden_size, TA const *A,
                                       TB const *B, TQA *QA, TSFA *SFA,
                                       MultiAmaxHadamardCastFusionArgs &args,
@@ -1265,29 +1343,83 @@ void group_row_col_rht_gemm_ntt_w_sfc(int packed_sequence_length, int hidden_siz
       SharedStorage<TA, TB, decltype(sA), decltype(sB), ClusterShape, AccumulatorPipelineStageCount,
                     EpilogueUnrollFactor, SchedulerPipelineStageCount>);
 
-  auto *kernel_ptr = &group_row_col_rht_gemm_device<
+  // Kernel pointer for the full quantization pass (consumes global amax,
+  // produces rowwise/colwise FP4 + scales). This is the non-fused path and
+  // the second launch of the fused path.
+  auto *kernel_ptr_quant = &group_row_col_rht_gemm_device<
       decltype(M), decltype(N), decltype(k_tile_size), decltype(cluster_shape),
       decltype(cluster_tile_shape), TA, decltype(dA), decltype(sA), decltype(tma_load_a), TB,
       decltype(dB), decltype(sB), decltype(tma_load_b), TD, decltype(dD), decltype(sD), TSFD,
       decltype(sfd_layout), TQA, decltype(dQA), TSFA, decltype(sfa_layout), decltype(mma),
       AccumulatorPipelineStageCount, SchedulerPipelineStageCount, kEnableStochasticRounding,
-      kEnableRHTColQuant, kEnableRowQuant, kEnableSwizzleSFOutput, kUseFastMath>;
+      kEnableRHTColQuant, kEnableRowQuant, kEnableSwizzleSFOutput, kUseFastMath,
+      /*kAmaxOnly=*/false>;
 
-  NVTE_CHECK_CUDA(
-      cudaFuncSetAttribute(*kernel_ptr, cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
+  NVTE_CHECK_CUDA(cudaFuncSetAttribute(*kernel_ptr_quant,
+                                       cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
 
-  // Set workspace and set to zero
-  NVTE_CHECK_CUDA(cudaMemsetAsync(reinterpret_cast<void *>(tile_scheduler_workspace), 0,
-                                  sizeof(uint32_t), stream));
+  if constexpr (kFuseAmax) {
+    // Fused path: compute amax with an amax-only launch, then feed the
+    // final amax into the quantization launch. Two sequential launches on
+    // the same stream give us the required synchronization for free --
+    // no cooperative launch / grid sync is needed.
+    auto *kernel_ptr_amax = &group_row_col_rht_gemm_device<
+        decltype(M), decltype(N), decltype(k_tile_size), decltype(cluster_shape),
+        decltype(cluster_tile_shape), TA, decltype(dA), decltype(sA), decltype(tma_load_a), TB,
+        decltype(dB), decltype(sB), decltype(tma_load_b), TD, decltype(dD), decltype(sD), TSFD,
+        decltype(sfd_layout), TQA, decltype(dQA), TSFA, decltype(sfa_layout), decltype(mma),
+        AccumulatorPipelineStageCount, SchedulerPipelineStageCount, kEnableStochasticRounding,
+        kEnableRHTColQuant, kEnableRowQuant, kEnableSwizzleSFOutput, kUseFastMath,
+        /*kAmaxOnly=*/true>;
+    NVTE_CHECK_CUDA(cudaFuncSetAttribute(*kernel_ptr_amax,
+                                         cudaFuncAttributeMaxDynamicSharedMemorySize, smem_size));
 
-  // Launch kernel
-  cutlass::ClusterLaunchParams params = {dimGrid, dimBlock, dimCluster, smem_size, stream};
-  cutlass::Status status = cutlass::launch_kernel_on_cluster(
-      params, (void const *)kernel_ptr, M, N, k_tile_size, cluster_shape, cluster_tile_shape, A, dA,
-      sA, tma_load_a, B, dB, sB, tma_load_b, QA, dQA, SFA, sfa_layout, args,
-      tile_scheduler_workspace, mma, rng_state);
-  NVTE_CHECK_CUDA(cudaGetLastError());
-  NVTE_CHECK(status == cutlass::Status::kSuccess, "Kernel launch failed.");
+    // Zero the global amax buffers before the amax launch writes into
+    // them via atomicMax. Looping on the host is fine: num_tensors is
+    // tiny (<= kMaxTensorsPerKernel == 64), and each memset is a small
+    // stream-ordered op that fires off in a few microseconds.
+    for (int g = 0; g < args.num_tensors; ++g) {
+      if (args.global_a_amax_list[g] != nullptr) {
+        NVTE_CHECK_CUDA(cudaMemsetAsync(args.global_a_amax_list[g], 0, sizeof(float), stream));
+      }
+      if (args.global_d_amax_list[g] != nullptr) {
+        NVTE_CHECK_CUDA(cudaMemsetAsync(args.global_d_amax_list[g], 0, sizeof(float), stream));
+      }
+    }
+
+    // Each launch uses its own scheduler counter slot so that the two
+    // launches do not contend on the same atomic counter. The workspace
+    // is sized for 2 counters when fused (see the dispatcher).
+    NVTE_CHECK_CUDA(cudaMemsetAsync(reinterpret_cast<void *>(tile_scheduler_workspace), 0,
+                                    2 * sizeof(uint32_t), stream));
+    uint32_t *amax_counter = tile_scheduler_workspace;
+    uint32_t *quant_counter = tile_scheduler_workspace + 1;
+
+    cutlass::ClusterLaunchParams params = {dimGrid, dimBlock, dimCluster, smem_size, stream};
+    cutlass::Status status_amax = cutlass::launch_kernel_on_cluster(
+        params, (void const *)kernel_ptr_amax, M, N, k_tile_size, cluster_shape, cluster_tile_shape,
+        A, dA, sA, tma_load_a, B, dB, sB, tma_load_b, QA, dQA, SFA, sfa_layout, args, amax_counter,
+        mma, rng_state);
+    NVTE_CHECK_CUDA(cudaGetLastError());
+    NVTE_CHECK(status_amax == cutlass::Status::kSuccess, "Amax-only kernel launch failed.");
+
+    cutlass::Status status_quant = cutlass::launch_kernel_on_cluster(
+        params, (void const *)kernel_ptr_quant, M, N, k_tile_size, cluster_shape,
+        cluster_tile_shape, A, dA, sA, tma_load_a, B, dB, sB, tma_load_b, QA, dQA, SFA, sfa_layout,
+        args, quant_counter, mma, rng_state);
+    NVTE_CHECK_CUDA(cudaGetLastError());
+    NVTE_CHECK(status_quant == cutlass::Status::kSuccess, "Quantization kernel launch failed.");
+  } else {
+    NVTE_CHECK_CUDA(cudaMemsetAsync(reinterpret_cast<void *>(tile_scheduler_workspace), 0,
+                                    sizeof(uint32_t), stream));
+    cutlass::ClusterLaunchParams params = {dimGrid, dimBlock, dimCluster, smem_size, stream};
+    cutlass::Status status = cutlass::launch_kernel_on_cluster(
+        params, (void const *)kernel_ptr_quant, M, N, k_tile_size, cluster_shape,
+        cluster_tile_shape, A, dA, sA, tma_load_a, B, dB, sB, tma_load_b, QA, dQA, SFA, sfa_layout,
+        args, tile_scheduler_workspace, mma, rng_state);
+    NVTE_CHECK_CUDA(cudaGetLastError());
+    NVTE_CHECK(status == cutlass::Status::kSuccess, "Kernel launch failed.");
+  }
 }
 
 }  // namespace
@@ -1425,37 +1557,55 @@ void group_hadamard_transform_cast_fusion(const Tensor &input_, std::vector<Tens
 
   const bool use_swizzle_sf_output = false;
 
+  // Opt-in flag for the amax+quant fused kernel. When on, the kernel
+  // internally zeros amax buffers, computes amax in a first pass, and
+  // consumes it in a second pass -- making the separate nvte_group_
+  // hadamard_transform_amax launch redundant (the caller should skip it).
+  // Requires the fused path (all split sections 128-aligned).
+  const bool use_fuse_amax =
+      transformer_engine::getenv<bool>("NVTE_FUSE_HAD_AMAX");
+  // Fused amax requires at least 2 u32 counters in the workspace.
+  if (use_fuse_amax) {
+    NVTE_CHECK(quant_workspace.data.buffer_size_bytes() >= 2 * sizeof(uint32_t),
+               "Quantization workspace must be at least 8 bytes when "
+               "NVTE_FUSE_HAD_AMAX=1.");
+  }
+
   TRANSFORMER_ENGINE_SWITCH_CONDITION(
-      use_stochastic_rounding, kEnableStochasticRounding,
+      use_fuse_amax, kFuseAmax,
       TRANSFORMER_ENGINE_SWITCH_CONDITION(
-          all_has_col_quant, kEnableRhtColQuant,
+          use_stochastic_rounding, kEnableStochasticRounding,
           TRANSFORMER_ENGINE_SWITCH_CONDITION(
-              all_has_row_quant, kEnableRowQuant,
+              all_has_col_quant, kEnableRhtColQuant,
               TRANSFORMER_ENGINE_SWITCH_CONDITION(
-                  use_swizzle_sf_output, kEnableSwizzleSFOutput,
+                  all_has_row_quant, kEnableRowQuant,
                   TRANSFORMER_ENGINE_SWITCH_CONDITION(
-                      quant_config.use_fast_math, kUseFastMath,
+                      use_swizzle_sf_output, kEnableSwizzleSFOutput,
+                      TRANSFORMER_ENGINE_SWITCH_CONDITION(
+                          quant_config.use_fast_math, kUseFastMath,
 
-                      if constexpr (kEnableRhtColQuant || kEnableRowQuant) {
-                        detail::group_row_col_rht_gemm_ntt_w_sfc<
-                            kEnableStochasticRounding, kEnableRhtColQuant, kEnableRowQuant,
-                            kEnableSwizzleSFOutput, TA, TB, TQA, TSFA, TD, TSFD, kUseFastMath>(
-                            /*packed_sequence_length=*/m, /*hidden_size=*/n,
-                            /*A=*/reinterpret_cast<TA const *>(input.dptr),
-                            /*B=*/reinterpret_cast<TB const *>(hadamard_matrix.dptr),
-                            /*QA=*/reinterpret_cast<TQA *>(rowwise_data_base_ptr),
-                            /*SFA=*/reinterpret_cast<TSFA *>(rowwise_scale_inv_base_ptr),
-                            /*args=*/kernel_args,
-                            /*rng_state=*/rng_state,
-                            /*tile_scheduler_workspace=*/tile_scheduler_workspace,
-                            /*sm_count=*/sm_count,
-                            /*stream=*/stream, /*k_tile_size=*/k_tile_size);
-                      } else {
-                        NVTE_ERROR("Invalid kernel configuration (kEnableRHTColQuant=",
-                                   kEnableRhtColQuant, ", kEnableRowQuant=", kEnableRowQuant, ").");
-                      }
+                          if constexpr (kEnableRhtColQuant || kEnableRowQuant) {
+                            detail::group_row_col_rht_gemm_ntt_w_sfc<
+                                kEnableStochasticRounding, kEnableRhtColQuant,
+                                kEnableRowQuant, kEnableSwizzleSFOutput, TA, TB, TQA, TSFA,
+                                TD, TSFD, kUseFastMath, kFuseAmax>(
+                                /*packed_sequence_length=*/m, /*hidden_size=*/n,
+                                /*A=*/reinterpret_cast<TA const *>(input.dptr),
+                                /*B=*/reinterpret_cast<TB const *>(hadamard_matrix.dptr),
+                                /*QA=*/reinterpret_cast<TQA *>(rowwise_data_base_ptr),
+                                /*SFA=*/reinterpret_cast<TSFA *>(rowwise_scale_inv_base_ptr),
+                                /*args=*/kernel_args,
+                                /*rng_state=*/rng_state,
+                                /*tile_scheduler_workspace=*/tile_scheduler_workspace,
+                                /*sm_count=*/sm_count,
+                                /*stream=*/stream, /*k_tile_size=*/k_tile_size);
+                          } else {
+                            NVTE_ERROR("Invalid kernel configuration (kEnableRHTColQuant=",
+                                       kEnableRhtColQuant,
+                                       ", kEnableRowQuant=", kEnableRowQuant, ").");
+                          }
 
-                  );););););
+                          ););););););
 }
 
 }  // namespace transformer_engine

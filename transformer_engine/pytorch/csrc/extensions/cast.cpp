@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -1081,14 +1082,38 @@ void split_quantize_nvfp4_impl_with_rht_helper(const TensorWrapper &input,
   auto &quant_config_list_colwise_to_use =
       need_separate_rng_states ? quant_config_list_colwise : quant_config_list;
 
+  // When NVTE_FUSE_HAD_AMAX=1 and the aligned path is taken, amax is
+  // computed inside nvte_group_hadamard_transform_cast_fusion, so we skip
+  // the standalone amax kernel here. Both call sites read the same env
+  // var in the same process, so the decision is consistent.
+  const bool use_fuse_amax =
+      transformer_engine::getenv<bool>("NVTE_FUSE_HAD_AMAX");
+  const bool fuse_amax_active = use_fuse_amax && all_aligned_token_dim;
+
+  {
+    static const bool _fuse_amax_debug =
+        transformer_engine::getenv<bool>("NVTE_FUSE_HAD_AMAX_DEBUG");
+    if (_fuse_amax_debug) {
+      std::fprintf(stderr,
+                   "[NVTE_FUSE_HAD_AMAX] env=%d all_aligned_token_dim=%d -> "
+                   "fuse_amax_active=%d (path: %s)\n",
+                   static_cast<int>(use_fuse_amax),
+                   static_cast<int>(all_aligned_token_dim),
+                   static_cast<int>(fuse_amax_active),
+                   fuse_amax_active ? "2-LAUNCH-FUSED" : "LEGACY-2-KERNEL");
+    }
+  }
+
   // Compute amaxes
   if (quantizer.with_post_rht_amax) {
-    // We need:
-    // 1. Rowwise amax = amax for input
-    // 2. Columnwise amax = amax for RHT(input.t)
-    nvte_group_hadamard_transform_amax(
-        input.data(), reinterpret_cast<NVTETensor *>(nvte_tensor_output_list.data()),
-        split_sections.data(), num_tensors, 0, quantizer.rht_matrix_random_sign_mask_t, stream);
+    if (!fuse_amax_active) {
+      // We need:
+      // 1. Rowwise amax = amax for input
+      // 2. Columnwise amax = amax for RHT(input.t)
+      nvte_group_hadamard_transform_amax(
+          input.data(), reinterpret_cast<NVTETensor *>(nvte_tensor_output_list.data()),
+          split_sections.data(), num_tensors, 0, quantizer.rht_matrix_random_sign_mask_t, stream);
+    }
   } else {
     // RHT is enabled, but amax is pre-RHT amax
     NVTE_ERROR("NVFP4 split-quantize does not yet support pre-RHT amax");
@@ -1100,9 +1125,12 @@ void split_quantize_nvfp4_impl_with_rht_helper(const TensorWrapper &input,
   auto rht_matrix_nvte = makeTransformerEngineTensor(quantizer.rht_matrix);
 
   if (all_aligned_token_dim) {
-    // allocate a tile scheduler workspace
+    // Allocate the tile scheduler workspace. The fused amax path needs one
+    // scheduler counter per phase (amax + quant); the legacy path needs
+    // one counter total. Over-allocating is cheap and harmless.
+    const int64_t workspace_counts = fuse_amax_active ? 2 : 1;
     auto tile_scheduler_workspace_torch =
-        at::empty({1}, at::device(at::kCUDA).dtype(torch::kInt32));
+        at::empty({workspace_counts}, at::device(at::kCUDA).dtype(torch::kInt32));
     auto nvte_tile_scheduler_workspace =
         makeTransformerEngineTensor(tile_scheduler_workspace_torch);
     // call the fully-fused grouped kernel for rowwise quantization & colwise RHT quantization transpose
