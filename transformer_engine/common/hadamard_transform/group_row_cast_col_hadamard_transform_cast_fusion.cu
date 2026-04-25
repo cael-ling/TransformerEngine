@@ -953,7 +953,11 @@ __launch_bounds__(512, 1) __global__ static void group_row_col_rht_gemm_device(
         using S2RThreadLayout = decltype(blocked_product(S2RWarpLayout{}, WarpGroupLayout{}));
         using S2RValLayout = Layout<Shape<Int<VectorSize>, _1>>;
         using S2RAtomA = Copy_Atom<AutoVectorizingCopy, TA>;
-        using R2GAtomQA = Copy_Atom<AutoVectorizingCopy, TQA>;
+        // Per-thread FP4 fragment is 16 elements * 4 bits = 64 bits (8B).
+        // Default AutoVectorizingCopy assumes 128-bit (16B) per-thread payload,
+        // which mismatches FP4 fragment width and forces narrower STG sequences.
+        // Forcing <64> selects UniversalCopy<uint64_t> -> clean STG.64 per thread.
+        using R2GAtomQA = Copy_Atom<AutoVectorizingCopyWithAssumedAlignment<64>, TQA>;
         using R2GAtomSFA = Copy_Atom<AutoVectorizingCopy, TSFA>;
         auto tiled_s2r = make_tiled_copy(S2RAtomA{}, S2RThreadLayout{}, S2RValLayout{});
         auto tiled_r2g_QA = make_tiled_copy(R2GAtomQA{}, S2RThreadLayout{}, S2RValLayout{});
