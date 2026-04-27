@@ -189,6 +189,35 @@ def _check_quantization_1x64_versus_reference_with_input(x: torch.Tensor) -> Non
     qx_valid = qx[: qx_ref.shape[0], : qx_ref.shape[1]]
     sx_valid = sx[: sx_ref.shape[0], : sx_ref.shape[1]]
 
+    # Diagnostic dump: print up to ten first mismatches each for qx/sx/amax
+    # before the assert_close calls trip. Helps pin down which row of the
+    # extrema input (zeros / uniform / outlier+noise / random) is misbehaving.
+    def _dump(name, sut, ref_, x_in=None):
+        if sut.shape != ref_.shape:
+            print(f"[diag] {name}: SHAPE MISMATCH sut={sut.shape} ref={ref_.shape}")
+            return
+        diff = sut != ref_
+        nmis = int(diff.sum().item())
+        if nmis == 0:
+            return
+        print(f"[diag] {name}: {nmis} mismatches out of {ref_.numel()}")
+        idx = torch.nonzero(diff, as_tuple=False)[:10]
+        for i in idx.tolist():
+            i = tuple(i)
+            row = i[0]
+            col = i[1] if len(i) > 1 else 0
+            extra = ""
+            if x_in is not None:
+                extra = f" x_row[{row}, {col}]={x_in[row, col].item():.6g}"
+            print(
+                f"  {name}{list(i)}: sut={int(sut[i].item())} ref={int(ref_[i].item())}{extra}"
+            )
+
+    _dump("qx", qx_valid, qx_ref, x_in=x)
+    _dump("sx", sx_valid, sx_ref)
+    if qx_amax.shape == ref_amax.shape and not torch.equal(qx_amax, ref_amax):
+        print(f"[diag] amax: sut={qx_amax.tolist()} ref={ref_amax.tolist()}")
+
     torch.testing.assert_close(qx_valid, qx_ref, atol=0.0, rtol=0.0)
     torch.testing.assert_close(sx_valid, sx_ref, atol=0.0, rtol=0.0)
     torch.testing.assert_close(qx_amax, ref_amax, atol=0.0, rtol=0.0)
