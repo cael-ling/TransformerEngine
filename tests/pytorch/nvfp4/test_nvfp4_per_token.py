@@ -55,9 +55,9 @@ _GATED_FP4 = pytest.mark.skipif(
 
 # Shapes obey the kernel contract (M % 128 == 0, K % 128 == 0).
 _QUANT_SHAPES = [
-    (128, 128),    # smallest legal shape
-    (128, 256),    # K > inner SF window of single chunk
-    (256, 128),    # M > inner SF window of single chunk
+    (128, 128),  # smallest legal shape
+    (128, 256),  # K > inner SF window of single chunk
+    (256, 128),  # M > inner SF window of single chunk
     (256, 512),
     (512, 1024),
 ]
@@ -92,8 +92,10 @@ def test_per_token_quantize_byte_exact(M: int, N: int, rowwise: bool, columnwise
         qx_ref = _unpack_fp4_byte_pairs(ref.data.view(torch.uint8))
         torch.testing.assert_close(qx_sut, qx_ref, atol=0.0, rtol=0.0)
         torch.testing.assert_close(
-            sut.scale.view(torch.uint8), ref.scale.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            sut.scale.view(torch.uint8),
+            ref.scale.view(torch.uint8),
+            atol=0.0,
+            rtol=0.0,
         )
         torch.testing.assert_close(sut.row_amax, ref.row_amax, atol=0.0, rtol=0.0)
 
@@ -104,18 +106,23 @@ def test_per_token_quantize_byte_exact(M: int, N: int, rowwise: bool, columnwise
         torch.testing.assert_close(
             sut.columnwise_scale.view(torch.uint8),
             ref.columnwise_scale.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            atol=0.0,
+            rtol=0.0,
         )
         torch.testing.assert_close(sut.col_amax, ref.col_amax, atol=0.0, rtol=0.0)
 
 
 # (2) Split-kernel parity: K1 then K2 == composite K1+K2.
 
+
 @_GATED_FP4
 @pytest.mark.parametrize("M,N", _QUANT_SHAPES)
 @pytest.mark.parametrize("rowwise,columnwise", [(True, False), (False, True), (True, True)])
 def test_per_token_split_byte_equal(
-    M: int, N: int, rowwise: bool, columnwise: bool,
+    M: int,
+    N: int,
+    rowwise: bool,
+    columnwise: bool,
 ) -> None:
     """K1 (amax) then K2 (encode) byte-equals the composite K1+K2."""
     torch.manual_seed(0xC0FFEE * (M + 7) + (N + 11))
@@ -128,7 +135,9 @@ def test_per_token_split_byte_equal(
     composite = nvfp4_per_token_quantize(x, rowwise=rowwise, columnwise=columnwise)
 
     row_amax, col_amax = nvfp4_per_token_amax(
-        x, rowwise=rowwise, columnwise=columnwise,
+        x,
+        rowwise=rowwise,
+        columnwise=columnwise,
     )
     split = nvfp4_per_token_encode(
         x,
@@ -141,28 +150,35 @@ def test_per_token_split_byte_equal(
     if rowwise:
         torch.testing.assert_close(split.row_amax, composite.row_amax, atol=0.0, rtol=0.0)
         torch.testing.assert_close(
-            split.data.view(torch.uint8), composite.data.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            split.data.view(torch.uint8),
+            composite.data.view(torch.uint8),
+            atol=0.0,
+            rtol=0.0,
         )
         torch.testing.assert_close(
-            split.scale.view(torch.uint8), composite.scale.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            split.scale.view(torch.uint8),
+            composite.scale.view(torch.uint8),
+            atol=0.0,
+            rtol=0.0,
         )
     if columnwise:
         torch.testing.assert_close(split.col_amax, composite.col_amax, atol=0.0, rtol=0.0)
         torch.testing.assert_close(
             split.columnwise_data.view(torch.uint8),
             composite.columnwise_data.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            atol=0.0,
+            rtol=0.0,
         )
         torch.testing.assert_close(
             split.columnwise_scale.view(torch.uint8),
             composite.columnwise_scale.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            atol=0.0,
+            rtol=0.0,
         )
 
 
 # (2b) Input-validation rejections.
+
 
 @_GATED_FP4
 def test_per_token_validation_rejects_fp32() -> None:
@@ -188,6 +204,7 @@ def test_per_token_validation_rejects_unaligned() -> None:
 
 # (3) Dequant + fp32 reference matmul sanity (pure-Python, no kernel).
 
+
 @_GATED_FP4
 @pytest.mark.parametrize("M,N", [(32, 64), (64, 256)])
 def test_per_token_dequant_roundtrip_close(M: int, N: int) -> None:
@@ -207,10 +224,10 @@ def test_per_token_dequant_roundtrip_close(M: int, N: int) -> None:
 # (4) Production GEMM: cuBLAS LT NVFP4 + post-scale composite.
 # Shapes need M, N % 128 == 0 and K % 16 == 0 for cuBLAS LT NVFP4.
 _GEMM_SHAPES = [
-    (128, 128, 128),   # smallest legal shape
-    (128, 128, 256),   # exercise K > inner SF window
-    (256, 128, 256),   # non-square (M != N)
-    (256, 256, 256),   # square mid-size
+    (128, 128, 128),  # smallest legal shape
+    (128, 128, 256),  # exercise K > inner SF window
+    (256, 128, 256),  # non-square (M != N)
+    (256, 256, 256),  # square mid-size
 ]
 
 
@@ -254,24 +271,24 @@ def _three_pronged_bf16_close(
         f"rel_l2={rel_l2:.3g} max_abs={max_abs:.3g} n_bad_mixed={n_bad_mixed} "
         f"mean_|d_ref|={mean_ref_abs:.3g} "
         f"(diag: mean_rel={mean_rel:.3g} max_rel={max_rel:.3g} "
-        f"— mean_rel/max_rel are NOT asserted; see helper docstring)"
+        "— mean_rel/max_rel are NOT asserted; see helper docstring)"
     )
     print(diag)
 
     bad_count_abs_floor = max(8, int(bad_count_ratio * n))
     assert rel_l2 <= rel_l2_floor, (
         f"{diag} -> rel_l2 > {rel_l2_floor} (energy-weighted global "
-        f"relative error too high — possible structural bug)"
+        "relative error too high — possible structural bug)"
     )
     assert n_bad_mixed <= bad_count_abs_floor, (
         f"{diag} -> n_bad_mixed > {bad_count_abs_floor} "
         f"(|diff| > atol={atol} + rtol={bad_rtol} * |d_r| for too "
-        f"many elements — possible localised broken row/col)"
+        "many elements — possible localised broken row/col)"
     )
     assert max_abs <= max_abs_bound, (
         f"{diag} -> max_abs > {max_abs_bound:.3g} = atol + "
-        f"bad_rtol * mean_|d_ref| (worst element is way outside the "
-        f"noise envelope — possible NaN-like blow-up)"
+        "bad_rtol * mean_|d_ref| (worst element is way outside the "
+        "noise envelope — possible NaN-like blow-up)"
     )
 
 
@@ -292,8 +309,12 @@ def test_per_token_gemm_close_to_bf16(M: int, N: int, K: int) -> None:
     b_q = nvfp4_per_token_quantize(b, rowwise=True)
 
     d_sut = nvfp4_per_token_gemm(
-        a_q.data, a_q.scale, a_q.row_amax,
-        b_q.data, b_q.scale, b_q.row_amax,
+        a_q.data,
+        a_q.scale,
+        a_q.row_amax,
+        b_q.data,
+        b_q.scale,
+        b_q.row_amax,
     )
 
     d_ref = (a.float() @ b.float().t()).to(torch.bfloat16)
@@ -318,11 +339,11 @@ def test_per_token_gemm_close_to_bf16(M: int, N: int, K: int) -> None:
     )
     assert cos_sim >= cos_sim_floor, (
         f"{diag} -> cos_sim < {cos_sim_floor} (structural mismatch; "
-        f"likely wrong operand swap, missing scale, or indexing bug)"
+        "likely wrong operand swap, missing scale, or indexing bug)"
     )
     assert mag_lo <= mag_ratio <= mag_hi, (
         f"{diag} -> mag_ratio not in [{mag_lo}, {mag_hi}] "
-        f"(systematic magnitude error; check alpha/post-scale)"
+        "(systematic magnitude error; check alpha/post-scale)"
     )
 
 
@@ -339,21 +360,33 @@ def test_per_token_gemm_close_to_dequant_ref(M: int, N: int, K: int) -> None:
     b_q = nvfp4_per_token_quantize(b, rowwise=True)
 
     d_sut = nvfp4_per_token_gemm(
-        a_q.data, a_q.scale, a_q.row_amax,
-        b_q.data, b_q.scale, b_q.row_amax,
+        a_q.data,
+        a_q.scale,
+        a_q.row_amax,
+        b_q.data,
+        b_q.scale,
+        b_q.row_amax,
     ).float()
 
     d_ref = nvfp4_per_token_gemm_dequant(
-        a_q.data, a_q.scale, a_q.row_amax,
-        b_q.data, b_q.scale, b_q.row_amax,
+        a_q.data,
+        a_q.scale,
+        a_q.row_amax,
+        b_q.data,
+        b_q.scale,
+        b_q.row_amax,
         out_dtype=torch.float32,
     )
 
     _three_pronged_bf16_close(
-        d_sut, d_ref,
+        d_sut,
+        d_ref,
         label=f"vs_dequant({M}x{N}x{K})",
         # Empirical rel_l2 ~5e-3..1.5e-2 on random N(0, 0.5), K=128-256.
-        rel_l2_floor=2e-2, atol=1e-1, bad_rtol=5e-2, bad_count_ratio=1e-2,
+        rel_l2_floor=2e-2,
+        atol=1e-1,
+        bad_rtol=5e-2,
+        bad_count_ratio=1e-2,
     )
 
 
@@ -369,7 +402,11 @@ def test_per_token_gemm_rejects_beta_nonzero() -> None:
 
     with pytest.raises(ValueError, match=r"beta != 0"):
         nvfp4_per_token_gemm(
-            a_q.data, a_q.scale, a_q.row_amax,
-            b_q.data, b_q.scale, b_q.row_amax,
+            a_q.data,
+            a_q.scale,
+            a_q.row_amax,
+            b_q.data,
+            b_q.scale,
+            b_q.row_amax,
             beta=1.0,
         )

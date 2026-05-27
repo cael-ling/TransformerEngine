@@ -15,31 +15,30 @@
 extern "C" {
 #endif
 
-
 /*! \brief Composite K1+K2: per-row + per-col amax (K1) then FP4 + 1x16
  *         e4m3 SF encode (K2), back-to-back on the same stream.
  *
  *  This is the production entry point for the per-token cast on bf16 +
  *  128-aligned shapes.
  */
-void nvte_nvfp4_per_token_quantize(const NVTETensor input, const NVTETensor noop,
-                                          NVTETensor output, cudaStream_t stream);
+void nvte_nvfp4_per_token_quantize(const NVTETensor input, const NVTETensor noop, NVTETensor output,
+                                   cudaStream_t stream);
 
 /*! \brief Kernel 1 in isolation: per-row + per-col amax via TMA + atomicMax.
  *         Pre-zeroes the amax buffers and merges per-CTA partials into
  *         ``output->amax`` (size [M]) / ``output->columnwise_amax``
  *         (size [K]). Does NOT touch FP4 data / scale_inv slots.
  */
-void nvte_nvfp4_per_token_amax(const NVTETensor input, const NVTETensor noop,
-                                      NVTETensor output, cudaStream_t stream);
+void nvte_nvfp4_per_token_amax(const NVTETensor input, const NVTETensor noop, NVTETensor output,
+                               cudaStream_t stream);
 
 /*! \brief Kernel 2 in isolation: FP4 + 1x16 e4m3 SF encode given a
  *         pre-filled ``output->amax`` / ``output->columnwise_amax``. Reads
  *         the outer amax buffer(s) and writes the FP4 data / scale_inv
  *         tensors only.
  */
-void nvte_nvfp4_per_token_encode(const NVTETensor input, const NVTETensor noop,
-                                        NVTETensor output, cudaStream_t stream);
+void nvte_nvfp4_per_token_encode(const NVTETensor input, const NVTETensor noop, NVTETensor output,
+                                 cudaStream_t stream);
 
 /*! \brief Returns 1 iff the per-token kernels accept ``(M, K, dtype)``.
  *
@@ -59,8 +58,7 @@ int nvte_nvfp4_per_token_can_dispatch(size_t M, size_t K, int input_dtype_enum);
  *      d[i, j] = d[i, j] * row_amax_a[i] * row_amax_b[j]
  */
 void nvte_nvfp4_per_token_post_scale(NVTETensor d, const NVTETensor row_amax_a,
-                                     const NVTETensor row_amax_b,
-                                     cudaStream_t stream);
+                                     const NVTETensor row_amax_b, cudaStream_t stream);
 
 /* ============================================================================
  * Grouped (multi-tensor) per-token quantize.
@@ -76,8 +74,8 @@ void nvte_nvfp4_per_token_post_scale(NVTETensor d, const NVTETensor row_amax_a,
  *  \param[in]     stream         CUDA stream
  */
 void nvte_group_nvfp4_per_token_amax(const NVTETensor input, NVTETensor* outputs,
-                                     const size_t* split_sections, size_t num_tensors,
-                                     bool rowwise, bool columnwise, cudaStream_t stream);
+                                     const size_t* split_sections, size_t num_tensors, bool rowwise,
+                                     bool columnwise, cudaStream_t stream);
 
 /*! \brief Grouped per-token encode (FP4 + 1x16 e4m3 inner SF) using the
  *         row_amax / col_amax values already populated by
@@ -94,8 +92,8 @@ void nvte_group_nvfp4_per_token_amax(const NVTETensor input, NVTETensor* outputs
  *  \param[in]     stream         CUDA stream
  */
 void nvte_group_nvfp4_per_token_cast(const NVTETensor input, NVTETensor* outputs,
-                                     const size_t* split_sections, size_t num_tensors,
-                                     bool rowwise, bool columnwise, cudaStream_t stream);
+                                     const size_t* split_sections, size_t num_tensors, bool rowwise,
+                                     bool columnwise, cudaStream_t stream);
 
 /*! \brief Composite K1+K2 grouped per-token quantize. Calls the amax + cast
  *         kernels on the same stream. This is the external API

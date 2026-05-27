@@ -43,9 +43,7 @@ def cuda_time_ms(fn: Callable[[], None], *, warmup: int = 5, iters: int = 50) ->
     return statistics.median(samples)
 
 
-def cuda_graph_time_ms(
-    fn: Callable[[], object], *, warmup: int = 5, iters: int = 50
-) -> float:
+def cuda_graph_time_ms(fn: Callable[[], object], *, warmup: int = 5, iters: int = 50) -> float:
     """Median g.replay() wall time of fn captured into a CUDA Graph (kernel-only floor).
 
     Returns nan if capture fails.
@@ -104,10 +102,10 @@ def _has_sm100() -> bool:
 class ShapeBench:
     M: int
     K: int
-    t_pt: float          # per-token full K1+K2 (eager pybind, ms)
-    t_pten: float        # per-tensor full K1+K2 (eager pybind, ms)
-    t_pt_g: float        # per-token under CUDA Graphs replay (ms)
-    t_pten_g: float      # per-tensor under CUDA Graphs replay (ms)
+    t_pt: float  # per-token full K1+K2 (eager pybind, ms)
+    t_pten: float  # per-tensor full K1+K2 (eager pybind, ms)
+    t_pt_g: float  # per-token under CUDA Graphs replay (ms)
+    t_pten_g: float  # per-tensor under CUDA Graphs replay (ms)
 
 
 def _bench_shape(M: int, K: int, *, device: torch.device) -> ShapeBench:
@@ -132,7 +130,15 @@ def _bench_shape(M: int, K: int, *, device: torch.device) -> ShapeBench:
 
     def _pt_full_quant_fn():
         tex.nvfp4_per_token_quantize(
-            a, q_row_a, s_dec_row_a, ra_a, q_col_a, s_dec_col_a, ca_a, True, True,
+            a,
+            q_row_a,
+            s_dec_row_a,
+            ra_a,
+            q_col_a,
+            s_dec_col_a,
+            ca_a,
+            True,
+            True,
         )
 
     t_pten = cuda_time_ms(_baseline_quant_fn)
@@ -146,9 +152,7 @@ def _bench_shape(M: int, K: int, *, device: torch.device) -> ShapeBench:
 # 6x3 sweep matching bench_nvfp4_per_token_group.py: M in {1024..32768}, K in {2048,4096,8192}.
 _M_VALUES: Tuple[int, ...] = (1024, 2048, 4096, 8192, 16384, 32768)
 _K_VALUES: Tuple[int, ...] = (2048, 4096, 8192)
-_DEFAULT_SHAPES: Tuple[Tuple[int, int], ...] = tuple(
-    (m, k) for m in _M_VALUES for k in _K_VALUES
-)
+_DEFAULT_SHAPES: Tuple[Tuple[int, int], ...] = tuple((m, k) for m in _M_VALUES for k in _K_VALUES)
 
 
 def _parse_shape(s: str) -> Tuple[int, int]:
@@ -169,9 +173,14 @@ def main() -> int:
         description="Benchmark NVFP4 per-token K1+K2 quant vs per-tensor production NVFP4."
     )
     parser.add_argument(
-        "--shapes", type=_parse_shape, nargs="+", default=None,
-        help="Shapes to bench, in MxK form (e.g. 4096x4096). "
-             "Default: an internally-chosen production-shape sweep.",
+        "--shapes",
+        type=_parse_shape,
+        nargs="+",
+        default=None,
+        help=(
+            "Shapes to bench, in MxK form (e.g. 4096x4096). "
+            "Default: an internally-chosen production-shape sweep."
+        ),
     )
     args = parser.parse_args()
 
@@ -186,9 +195,9 @@ def main() -> int:
 
     header = (
         f"{'M':>7} {'K':>6}"
-        f" |"
+        " |"
         f"{'per-token':>10} {'per-tensor':>11} {'ratio':>8}"
-        f" |"
+        " |"
         f"{'per-token(Graph)':>17} {'per-tensor(Graph)':>18} {'ratio(Graph)':>13}"
     )
     print(header)
@@ -204,9 +213,9 @@ def main() -> int:
         ratio_g_s = "nan" if math.isnan(ratio_g) else f"{ratio_g:.2f}x"
         print(
             f"{rec.M:>7} {rec.K:>6}"
-            f" |"
+            " |"
             f"{rec.t_pt:>10.4f} {rec.t_pten:>11.4f} {ratio_s:>8}"
-            f" |"
+            " |"
             f"{rec.t_pt_g:>17.4f} {rec.t_pten_g:>18.4f} {ratio_g_s:>13}"
         )
 

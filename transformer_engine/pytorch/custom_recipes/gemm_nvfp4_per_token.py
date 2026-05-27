@@ -36,6 +36,7 @@ __all__ = [
 
 # Reference: dequantize + reference matmul.
 
+
 def _validate_per_token_triple(
     data: torch.Tensor, scale: torch.Tensor, row_amax: torch.Tensor, side: str
 ) -> int:
@@ -50,13 +51,9 @@ def _validate_per_token_triple(
     if K % BLOCK_K != 0:
         raise ValueError(f"{side}: K={K} must be a multiple of BLOCK_K={BLOCK_K}")
     if scale.shape != (rows, K // BLOCK_K):
-        raise ValueError(
-            f"{side}: scale shape {tuple(scale.shape)} != ({rows}, {K // BLOCK_K})"
-        )
+        raise ValueError(f"{side}: scale shape {tuple(scale.shape)} != ({rows}, {K // BLOCK_K})")
     if row_amax.shape != (rows,):
-        raise ValueError(
-            f"{side}: row_amax shape {tuple(row_amax.shape)} != ({rows},)"
-        )
+        raise ValueError(f"{side}: row_amax shape {tuple(row_amax.shape)} != ({rows},)")
     return K
 
 
@@ -113,6 +110,7 @@ def nvfp4_per_token_gemm_dequant(
 
 # Production wrapper: cuBLAS LT NVFP4 GEMM + per-token post-scale.
 
+
 def nvfp4_per_token_gemm(
     a_data: torch.Tensor,
     a_scale: torch.Tensor,
@@ -147,13 +145,9 @@ def nvfp4_per_token_gemm(
     # cuBLAS LT NVFP4 SF buffer is padded to (roundup(rows, 128), roundup(K/16, 4)).
     # Our compact quantize emits (rows, K/16); SF padding is a TODO so reject M/N < 128.
     if M < 128 or M % 128 != 0:
-        raise ValueError(
-            f"M must be a multiple of 128 (got M={M}); SF padding is a TODO."
-        )
+        raise ValueError(f"M must be a multiple of 128 (got M={M}); SF padding is a TODO.")
     if N < 128 or N % 128 != 0:
-        raise ValueError(
-            f"N must be a multiple of 128 (got N={N}); SF padding is a TODO."
-        )
+        raise ValueError(f"N must be a multiple of 128 (got N={N}); SF padding is a TODO.")
     if a_data.device != b_data.device:
         raise ValueError(
             f"A and B must be on the same device (got {a_data.device} vs {b_data.device})"
@@ -164,9 +158,7 @@ def nvfp4_per_token_gemm(
         out_bf16 = torch.empty((M, N), dtype=torch.bfloat16, device=device)
     else:
         if out.shape != (M, N):
-            raise ValueError(
-                f"out shape {tuple(out.shape)} != ({M}, {N})"
-            )
+            raise ValueError(f"out shape {tuple(out.shape)} != ({M}, {N})")
         if out.dtype != torch.bfloat16:
             raise ValueError(
                 f"out dtype must be bf16 for in-place use, got {out.dtype}. "
@@ -195,12 +187,23 @@ def nvfp4_per_token_gemm(
 
     # Lazy import to break the cpp_extensions.gemm circular import.
     from transformer_engine.pytorch.cpp_extensions.gemm import get_cublas_workspace
+
     workspace = get_cublas_workspace(device.index, ub=False, grouped_gemm=False)
 
     tex.nvfp4_per_token_gemm(
-        a_data_u8, b_data_u8, a_scale_u8_flat, b_scale_u8_flat,
-        a_row_amax_f32, b_row_amax_f32, out_bf16, workspace,
-        M, N, K, float(alpha), float(beta),
+        a_data_u8,
+        b_data_u8,
+        a_scale_u8_flat,
+        b_scale_u8_flat,
+        a_row_amax_f32,
+        b_row_amax_f32,
+        out_bf16,
+        workspace,
+        M,
+        N,
+        K,
+        float(alpha),
+        float(beta),
     )
 
     return out_bf16 if out_dtype is torch.bfloat16 else out_bf16.to(out_dtype)

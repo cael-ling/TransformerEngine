@@ -39,9 +39,7 @@ def _make_baseline_quantizer_list(num_splits: int) -> List[NVFP4Quantizer]:
     return [q] * num_splits
 
 
-def cuda_graph_time_ms(
-    fn: Callable[[], object], *, warmup: int = 5, iters: int = 50
-) -> float:
+def cuda_graph_time_ms(fn: Callable[[], object], *, warmup: int = 5, iters: int = 50) -> float:
     """Median g.replay() time of fn captured into a CUDA Graph, in ms.
 
     Returns nan if capture fails (e.g. some C-API does an incompatible sync).
@@ -106,9 +104,9 @@ def _time_split_quantize(x_concat, split_sections, quantizer_list, n_iters=20, n
     return start.elapsed_time(stop) / n_iters  # ms
 
 
-def _time_split_quantize_graph(x_concat, split_sections, quantizer_list,
-                               n_iters=20, n_warmup=5):
+def _time_split_quantize_graph(x_concat, split_sections, quantizer_list, n_iters=20, n_warmup=5):
     """Per-tensor grouped under CUDA Graphs replay."""
+
     def fn() -> None:
         _ = tex.split_quantize(x_concat, split_sections, quantizer_list)
 
@@ -117,6 +115,7 @@ def _time_split_quantize_graph(x_concat, split_sections, quantizer_list,
 
 def _time_grouped_graph(x_concat, split_sections, rowwise, columnwise, n_iters=20, n_warmup=5):
     """Per-token grouped under CUDA Graphs replay."""
+
     def fn() -> None:
         _ = nvfp4_per_token_group_quantize(
             x_concat, split_sections, rowwise=rowwise, columnwise=columnwise
@@ -158,9 +157,9 @@ def main() -> None:
 
     header = (
         f"{'sum_M':>6} {'K':>5}"
-        f" |"
+        " |"
         f"{'per-token':>10} {'per-tensor':>10} {'ratio':>8}"
-        f" |"
+        " |"
         f"{'per-token(Graph)':>17} {'per-tensor(Graph)':>17} {'ratio(Graph)':>13}"
     )
     print(header)
@@ -176,39 +175,23 @@ def main() -> None:
             print()
         prev_sum_M = sum_M
 
-        x_concat = (
-            torch.randn((sum_M, K), dtype=torch.bfloat16, device=device) * 3.0
-        ).contiguous()
+        x_concat = (torch.randn((sum_M, K), dtype=torch.bfloat16, device=device) * 3.0).contiguous()
         quantizer_list = _make_baseline_quantizer_list(num_splits)
 
         t_pt = _time_grouped(x_concat, split_sections, rowwise, columnwise)
         t_pten = _time_split_quantize(x_concat, split_sections, quantizer_list)
         ratio = t_pt / t_pten if t_pten > 0 else float("nan")
 
-        t_pt_g = _time_grouped_graph(
-            x_concat, split_sections, rowwise, columnwise
-        )
-        t_pten_g = _time_split_quantize_graph(
-            x_concat, split_sections, quantizer_list
-        )
+        t_pt_g = _time_grouped_graph(x_concat, split_sections, rowwise, columnwise)
+        t_pten_g = _time_split_quantize_graph(x_concat, split_sections, quantizer_list)
         if math.isnan(t_pt_g) or math.isnan(t_pten_g) or t_pten_g <= 0:
             ratio_g = float("nan")
-            graph_cells = (
-                f"{t_pt_g:>17.4f} {t_pten_g:>17.4f} {'nan':>13}"
-            )
+            graph_cells = f"{t_pt_g:>17.4f} {t_pten_g:>17.4f} {'nan':>13}"
         else:
             ratio_g = t_pt_g / t_pten_g
-            graph_cells = (
-                f"{t_pt_g:>17.4f} {t_pten_g:>17.4f} {ratio_g:>12.2f}x"
-            )
+            graph_cells = f"{t_pt_g:>17.4f} {t_pten_g:>17.4f} {ratio_g:>12.2f}x"
 
-        print(
-            f"{sum_M:>6d} {K:>5d}"
-            f" |"
-            f"{t_pt:>10.4f} {t_pten:>10.4f} {ratio:>7.2f}x"
-            f" |"
-            f"{graph_cells}"
-        )
+        print(f"{sum_M:>6d} {K:>5d} |{t_pt:>10.4f} {t_pten:>10.4f} {ratio:>7.2f}x |{graph_cells}")
 
         del x_concat, quantizer_list
         torch.cuda.empty_cache()

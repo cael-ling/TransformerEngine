@@ -31,8 +31,7 @@ constexpr int kElemsPerThread = 8;  // bf16x8 = 16-byte vector
 constexpr int kThreadsX = kTileCols / kElemsPerThread;
 constexpr int kThreadsY = kTileRows;
 constexpr int kThreadsPerBlock = kThreadsX * kThreadsY;
-static_assert(kTileCols % kElemsPerThread == 0,
-              "kTileCols must be a multiple of kElemsPerThread");
+static_assert(kTileCols % kElemsPerThread == 0, "kTileCols must be a multiple of kElemsPerThread");
 static_assert(kElemsPerThread * sizeof(__nv_bfloat16) == sizeof(int4),
               "kElemsPerThread bf16 must pack into a single int4 (16 bytes)");
 
@@ -102,8 +101,8 @@ void per_token_post_scale(Tensor* d, const Tensor& row_amax_a, const Tensor& row
              "NVFP4 per-token post-scale: row_amax_b must be FP32.");
 
   const auto& d_shape = d->data.shape;
-  NVTE_CHECK(d_shape.size() == 2, "NVFP4 per-token post-scale: d must be 2D, got rank=",
-             d_shape.size());
+  NVTE_CHECK(d_shape.size() == 2,
+             "NVFP4 per-token post-scale: d must be 2D, got rank=", d_shape.size());
   const int M = static_cast<int>(d_shape[0]);
   const int N = static_cast<int>(d_shape[1]);
   NVTE_CHECK(row_amax_a.data.numel() == static_cast<size_t>(M),

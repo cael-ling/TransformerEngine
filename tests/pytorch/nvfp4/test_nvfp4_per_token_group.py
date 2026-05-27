@@ -89,9 +89,7 @@ def _group_quantize_py(
     col_amax_list: List[torch.Tensor] = []
 
     for M_i in split_sections:
-        qr, sr, ra, qc, sc, ca = _alloc_per_token_buffers(
-            M_i, K, rowwise, columnwise, device
-        )
+        qr, sr, ra, qc, sc, ca = _alloc_per_token_buffers(M_i, K, rowwise, columnwise, device)
         if rowwise:
             q_row_list.append(qr)
             s_dec_row_list.append(sr)
@@ -122,14 +120,10 @@ def _group_quantize_py(
         # Re-view e4m3 SF as torch.float8_e4m3fn (same bytes, expected dtype).
         tensor = RefNVFP4TensorPerToken(
             data=q_row_list[i] if rowwise else None,
-            scale=(
-                s_dec_row_list[i].view(torch.float8_e4m3fn) if rowwise else None
-            ),
+            scale=(s_dec_row_list[i].view(torch.float8_e4m3fn) if rowwise else None),
             row_amax=row_amax_list[i] if rowwise else None,
             columnwise_data=q_col_list[i] if columnwise else None,
-            columnwise_scale=(
-                s_dec_col_list[i].view(torch.float8_e4m3fn) if columnwise else None
-            ),
+            columnwise_scale=(s_dec_col_list[i].view(torch.float8_e4m3fn) if columnwise else None),
             col_amax=col_amax_list[i] if columnwise else None,
         )
         out.append(tensor)
@@ -139,13 +133,13 @@ def _group_quantize_py(
 # Test fixtures. Per-token kernel requires M_i % 128 == 0 and K % 128 == 0.
 _SHAPES: List[Tuple[List[int], int]] = [
     # (split_sections, K)
-    ([128], 128),                       # trivial: 1 split, smallest legal shape
-    ([128, 128], 128),                  # 2 equal splits
-    ([128, 256], 128),                  # 2 unequal splits
-    ([128, 256, 128], 256),             # 3 splits, mixed sizes
-    ([128, 128, 128, 128], 256),        # 4 equal splits
-    ([256, 128, 384, 128, 128], 512),   # 5-way unequal split, typical MoE
-    ([256, 256], 1024),                 # larger K, 2 splits
+    ([128], 128),  # trivial: 1 split, smallest legal shape
+    ([128, 128], 128),  # 2 equal splits
+    ([128, 256], 128),  # 2 unequal splits
+    ([128, 256, 128], 256),  # 3 splits, mixed sizes
+    ([128, 128, 128, 128], 256),  # 4 equal splits
+    ([256, 128, 384, 128, 128], 512),  # 5-way unequal split, typical MoE
+    ([256, 256], 1024),  # larger K, 2 splits
 ]
 
 
@@ -179,8 +173,7 @@ def test_group_per_token_quantize_byte_equal(
     assert x_concat.shape == (sum_M, K)
 
     oracle: List[RefNVFP4TensorPerToken] = [
-        nvfp4_per_token_quantize(s, rowwise=rowwise, columnwise=columnwise)
-        for s in splits_in
+        nvfp4_per_token_quantize(s, rowwise=rowwise, columnwise=columnwise) for s in splits_in
     ]
 
     sut: List[RefNVFP4TensorPerToken] = _group_quantize_py(
@@ -194,34 +187,44 @@ def test_group_per_token_quantize_byte_equal(
             torch.testing.assert_close(
                 sut[i].data.view(torch.uint8),
                 oracle[i].data.view(torch.uint8),
-                atol=0.0, rtol=0.0,
+                atol=0.0,
+                rtol=0.0,
                 msg=f"rowwise q[{i}] mismatch",
             )
             torch.testing.assert_close(
                 sut[i].scale.view(torch.uint8),
                 oracle[i].scale.view(torch.uint8),
-                atol=0.0, rtol=0.0,
+                atol=0.0,
+                rtol=0.0,
                 msg=f"rowwise s_dec[{i}] mismatch",
             )
             torch.testing.assert_close(
-                sut[i].row_amax, oracle[i].row_amax, atol=0.0, rtol=0.0,
+                sut[i].row_amax,
+                oracle[i].row_amax,
+                atol=0.0,
+                rtol=0.0,
                 msg=f"row_amax[{i}] mismatch",
             )
         if columnwise:
             torch.testing.assert_close(
                 sut[i].columnwise_data.view(torch.uint8),
                 oracle[i].columnwise_data.view(torch.uint8),
-                atol=0.0, rtol=0.0,
+                atol=0.0,
+                rtol=0.0,
                 msg=f"columnwise q[{i}] mismatch",
             )
             torch.testing.assert_close(
                 sut[i].columnwise_scale.view(torch.uint8),
                 oracle[i].columnwise_scale.view(torch.uint8),
-                atol=0.0, rtol=0.0,
+                atol=0.0,
+                rtol=0.0,
                 msg=f"columnwise s_dec[{i}] mismatch",
             )
             torch.testing.assert_close(
-                sut[i].col_amax, oracle[i].col_amax, atol=0.0, rtol=0.0,
+                sut[i].col_amax,
+                oracle[i].col_amax,
+                atol=0.0,
+                rtol=0.0,
                 msg=f"col_amax[{i}] mismatch",
             )
 
@@ -255,12 +258,16 @@ def test_group_per_token_amax_byte_equal(
         oracle_row.append(o.row_amax if rowwise else None)
         oracle_col.append(o.col_amax if columnwise else None)
 
-    row_amax_list = [
-        torch.empty((M_i,), dtype=torch.float32, device=device) for M_i in split_sections
-    ] if rowwise else []
-    col_amax_list = [
-        torch.empty((K,), dtype=torch.float32, device=device) for _ in range(n)
-    ] if columnwise else []
+    row_amax_list = (
+        [torch.empty((M_i,), dtype=torch.float32, device=device) for M_i in split_sections]
+        if rowwise
+        else []
+    )
+    col_amax_list = (
+        [torch.empty((K,), dtype=torch.float32, device=device) for _ in range(n)]
+        if columnwise
+        else []
+    )
 
     tex.nvfp4_per_token_group_amax(
         x_concat, split_sections, row_amax_list, col_amax_list, rowwise, columnwise
@@ -269,13 +276,19 @@ def test_group_per_token_amax_byte_equal(
     if rowwise:
         for i in range(n):
             torch.testing.assert_close(
-                row_amax_list[i], oracle_row[i], atol=0.0, rtol=0.0,
+                row_amax_list[i],
+                oracle_row[i],
+                atol=0.0,
+                rtol=0.0,
                 msg=f"row_amax[{i}] mismatch",
             )
     if columnwise:
         for i in range(n):
             torch.testing.assert_close(
-                col_amax_list[i], oracle_col[i], atol=0.0, rtol=0.0,
+                col_amax_list[i],
+                oracle_col[i],
+                atol=0.0,
+                rtol=0.0,
                 msg=f"col_amax[{i}] mismatch",
             )
 
@@ -300,18 +313,19 @@ def test_group_single_split_matches_single_tensor(
     if rowwise:
         torch.testing.assert_close(sut.data, oracle.data, atol=0.0, rtol=0.0)
         torch.testing.assert_close(
-            sut.scale.view(torch.uint8), oracle.scale.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            sut.scale.view(torch.uint8),
+            oracle.scale.view(torch.uint8),
+            atol=0.0,
+            rtol=0.0,
         )
         torch.testing.assert_close(sut.row_amax, oracle.row_amax, atol=0.0, rtol=0.0)
     if columnwise:
-        torch.testing.assert_close(
-            sut.columnwise_data, oracle.columnwise_data, atol=0.0, rtol=0.0
-        )
+        torch.testing.assert_close(sut.columnwise_data, oracle.columnwise_data, atol=0.0, rtol=0.0)
         torch.testing.assert_close(
             sut.columnwise_scale.view(torch.uint8),
             oracle.columnwise_scale.view(torch.uint8),
-            atol=0.0, rtol=0.0,
+            atol=0.0,
+            rtol=0.0,
         )
         torch.testing.assert_close(sut.col_amax, oracle.col_amax, atol=0.0, rtol=0.0)
 
