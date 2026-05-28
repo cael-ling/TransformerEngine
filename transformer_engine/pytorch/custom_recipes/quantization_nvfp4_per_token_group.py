@@ -29,14 +29,20 @@ def _validate_per_token_group_input(
     ``(sum_M, K)``.
     """
     if x_concat.ndim != 2:
-        raise ValueError(f"nvfp4_per_token_group_quantize expects a 2D input, got {x_concat.ndim}D")
+        raise ValueError(
+            f"nvfp4_per_token_group_quantize expects a 2D input, got {x_concat.ndim}D"
+        )
     if not x_concat.is_contiguous():
         raise ValueError("x_concat must be contiguous (row-major)")
     if x_concat.dtype != torch.bfloat16:
-        raise ValueError(f"Per-token grouped kernel is bf16-only; got dtype {x_concat.dtype}.")
+        raise ValueError(
+            f"Per-token grouped kernel is bf16-only; got dtype {x_concat.dtype}."
+        )
     sum_M, K = x_concat.shape
     if K % _PER_TOKEN_TILE != 0:
-        raise ValueError(f"Per-token grouped kernel requires K % {_PER_TOKEN_TILE} == 0; got K={K}")
+        raise ValueError(
+            f"Per-token grouped kernel requires K % {_PER_TOKEN_TILE} == 0; got K={K}"
+        )
     if len(split_sections) == 0:
         raise ValueError("split_sections must not be empty")
     if len(split_sections) > 64:
@@ -48,11 +54,19 @@ def _validate_per_token_group_input(
         if M_i <= 0:
             raise ValueError(f"split_sections[{i}] must be > 0, got {M_i}")
         if M_i % _PER_TOKEN_TILE != 0:
-            raise ValueError(f"split_sections[{i}] = {M_i} must be a multiple of {_PER_TOKEN_TILE}")
+            raise ValueError(
+                f"split_sections[{i}] = {M_i} must be a multiple of {_PER_TOKEN_TILE}"
+            )
         acc += M_i
     if acc != sum_M:
-        raise ValueError(f"sum(split_sections) = {acc} must equal input.size(0) = {sum_M}")
+        raise ValueError(
+            f"sum(split_sections) = {acc} must equal input.size(0) = {sum_M}"
+        )
     return sum_M, K
+
+
+# Default RHT sign-flip mask seed; matches the single-tensor wrapper.
+_RHT_MASK_DEFAULT: int = 0xACE1
 
 
 def nvfp4_per_token_group_quantize(
@@ -61,8 +75,19 @@ def nvfp4_per_token_group_quantize(
     *,
     rowwise: bool = True,
     columnwise: bool = False,
+    with_rht: bool = False,
+    random_sign_mask_t: int = _RHT_MASK_DEFAULT,
 ) -> List[RefNVFP4TensorPerToken]:
     """Grouped NVFP4 per-token cast; returns N RefNVFP4TensorPerToken splits.
+
+    Args:
+        x_concat: (sum_M, K) bf16, row-major contiguous.
+        split_sections: per-split row counts (each a multiple of 128).
+        rowwise / columnwise: which directions to emit.
+        with_rht: True -> apply a 16-pt col-wise RHT in BOTH K1 and K2;
+            downstream GEMM must consume RHT-rotated weights to stay
+            unbiased. Rowwise never sees RHT.
+        random_sign_mask_t: low 16 bits = sign pattern shared by K1+K2.
 
     Raises ``ValueError`` on shape / dtype / split-size violations.
     """
@@ -83,7 +108,11 @@ def nvfp4_per_token_group_quantize(
         q_col_list,
         s_dec_col_list,
         col_amax_list,
-    ) = tex.nvfp4_per_token_group_quantize_bulk(x_concat, split_sections_list, rowwise, columnwise)
+    ) = tex.nvfp4_per_token_group_quantize_bulk(
+        x_concat, split_sections_list, rowwise, columnwise,
+        with_rht=bool(with_rht),
+        random_sign_mask_t=int(random_sign_mask_t) & 0xFFFF,
+    )
 
     outs: List[RefNVFP4TensorPerToken] = []
     for i in range(N):
