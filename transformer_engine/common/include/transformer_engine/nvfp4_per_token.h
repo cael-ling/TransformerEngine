@@ -15,7 +15,6 @@
 extern "C" {
 #endif
 
-
 /*! \brief Composite K1+K2: per-row + per-col amax (K1) then FP4 + 1x16
  *         e4m3 SF encode (K2), back-to-back on the same stream.
  *
@@ -27,11 +26,8 @@ extern "C" {
  *  \param[in] random_sign_mask_t  low 16 bits = sign-flip pattern shared by
  *                       K1 and K2. Ignored when with_rht == 0.
  */
-void nvte_nvfp4_per_token_quantize(const NVTETensor input, const NVTETensor noop,
-                                          NVTETensor output,
-                                          int with_rht,
-                                          int random_sign_mask_t,
-                                          cudaStream_t stream);
+void nvte_nvfp4_per_token_quantize(const NVTETensor input, const NVTETensor noop, NVTETensor output,
+                                   int with_rht, int random_sign_mask_t, cudaStream_t stream);
 
 /*! \brief Kernel 1 in isolation: per-row + per-col amax via TMA + atomicMax.
  *         Pre-zeroes the amax buffers and merges per-CTA partials into
@@ -45,11 +41,8 @@ void nvte_nvfp4_per_token_quantize(const NVTETensor input, const NVTETensor noop
  *                       when with_rht == 0. Type matches prod's
  *                       nvte_hadamard_transform_amax convention.
  */
-void nvte_nvfp4_per_token_amax(const NVTETensor input, const NVTETensor noop,
-                               NVTETensor output,
-                               int with_rht,
-                               int random_sign_mask_t,
-                               cudaStream_t stream);
+void nvte_nvfp4_per_token_amax(const NVTETensor input, const NVTETensor noop, NVTETensor output,
+                               int with_rht, int random_sign_mask_t, cudaStream_t stream);
 
 /*! \brief Kernel 2 in isolation: FP4 + 1x16 e4m3 SF encode given a
  *         pre-filled ``output->amax`` / ``output->columnwise_amax``. Reads
@@ -62,11 +55,8 @@ void nvte_nvfp4_per_token_amax(const NVTETensor input, const NVTETensor noop,
  *  \param[in] random_sign_mask_t  low 16 bits = sign-flip pattern; ignored
  *                       when with_rht == 0.
  */
-void nvte_nvfp4_per_token_encode(const NVTETensor input, const NVTETensor noop,
-                                        NVTETensor output,
-                                        int with_rht,
-                                        int random_sign_mask_t,
-                                        cudaStream_t stream);
+void nvte_nvfp4_per_token_encode(const NVTETensor input, const NVTETensor noop, NVTETensor output,
+                                 int with_rht, int random_sign_mask_t, cudaStream_t stream);
 
 /*! \brief Returns 1 iff the per-token kernels accept ``(M, K, dtype)``.
  *
@@ -86,8 +76,7 @@ int nvte_nvfp4_per_token_can_dispatch(size_t M, size_t K, int input_dtype_enum);
  *      d[i, j] = d[i, j] * row_amax_a[i] * row_amax_b[j]
  */
 void nvte_nvfp4_per_token_post_scale(NVTETensor d, const NVTETensor row_amax_a,
-                                     const NVTETensor row_amax_b,
-                                     cudaStream_t stream);
+                                     const NVTETensor row_amax_b, cudaStream_t stream);
 
 /* ============================================================================
  * Grouped (multi-tensor) per-token quantize.
@@ -108,9 +97,8 @@ void nvte_nvfp4_per_token_post_scale(NVTETensor d, const NVTETensor row_amax_a,
  *  \param[in]     stream         CUDA stream
  */
 void nvte_group_nvfp4_per_token_amax(const NVTETensor input, NVTETensor* outputs,
-                                     const size_t* split_sections, size_t num_tensors,
-                                     bool rowwise, bool columnwise,
-                                     int with_rht, int random_sign_mask_t,
+                                     const size_t* split_sections, size_t num_tensors, bool rowwise,
+                                     bool columnwise, int with_rht, int random_sign_mask_t,
                                      cudaStream_t stream);
 
 /*! \brief Grouped per-token encode (FP4 + 1x16 e4m3 inner SF) using the
@@ -133,9 +121,8 @@ void nvte_group_nvfp4_per_token_amax(const NVTETensor input, NVTETensor* outputs
  *  \param[in]     stream         CUDA stream
  */
 void nvte_group_nvfp4_per_token_cast(const NVTETensor input, NVTETensor* outputs,
-                                     const size_t* split_sections, size_t num_tensors,
-                                     bool rowwise, bool columnwise,
-                                     int with_rht, int random_sign_mask_t,
+                                     const size_t* split_sections, size_t num_tensors, bool rowwise,
+                                     bool columnwise, int with_rht, int random_sign_mask_t,
                                      cudaStream_t stream);
 
 /*! \brief Composite K1+K2 grouped per-token quantize. Calls the amax + cast
@@ -161,9 +148,8 @@ void nvte_group_nvfp4_per_token_cast(const NVTETensor input, NVTETensor* outputs
  */
 void nvte_group_nvfp4_per_token_quantize(const NVTETensor input, NVTETensor* outputs,
                                          const size_t* split_sections, size_t num_tensors,
-                                         bool rowwise, bool columnwise,
-                                         int with_rht, int random_sign_mask_t,
-                                         cudaStream_t stream);
+                                         bool rowwise, bool columnwise, int with_rht,
+                                         int random_sign_mask_t, cudaStream_t stream);
 
 #ifdef __cplusplus
 }

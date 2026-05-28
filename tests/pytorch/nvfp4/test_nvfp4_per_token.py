@@ -444,7 +444,8 @@ def _sign_diag_16(mask: int, device: torch.device) -> torch.Tensor:
     """16-elt +/-1 vector; s_i = -1 iff bit i of `mask` is set."""
     bits = torch.tensor(
         [1 - 2 * ((mask >> i) & 1) for i in range(16)],
-        dtype=torch.float32, device=device,
+        dtype=torch.float32,
+        device=device,
     )
     return bits
 
@@ -474,18 +475,18 @@ def _reference_amax_raw(x_bf16: torch.Tensor) -> Tuple[torch.Tensor, torch.Tenso
 def _allocate_per_token_buffers(M: int, K: int, device: torch.device):
     """Match the layout that ``tex.nvfp4_per_token_quantize`` writes."""
     return {
-        "q_row":  torch.empty((M, K // 2), dtype=torch.uint8, device=device),
-        "s_row":  torch.empty((M, K // BLOCK_K), dtype=torch.uint8, device=device),
-        "ra":     torch.empty((M,), dtype=torch.float32, device=device),
-        "q_col":  torch.empty((K, M // 2), dtype=torch.uint8, device=device),
-        "s_col":  torch.empty((K, M // BLOCK_K), dtype=torch.uint8, device=device),
-        "ca":     torch.empty((K,), dtype=torch.float32, device=device),
+        "q_row": torch.empty((M, K // 2), dtype=torch.uint8, device=device),
+        "s_row": torch.empty((M, K // BLOCK_K), dtype=torch.uint8, device=device),
+        "ra": torch.empty((M,), dtype=torch.float32, device=device),
+        "q_col": torch.empty((K, M // 2), dtype=torch.uint8, device=device),
+        "s_col": torch.empty((K, M // BLOCK_K), dtype=torch.uint8, device=device),
+        "ca": torch.empty((K,), dtype=torch.float32, device=device),
     }
 
 
 def _dequant_fp4_with_outer_amax(
-    q_packed: torch.Tensor,    # (R, C // 2) uint8 packed FP4
-    s_dec: torch.Tensor,       # (R, C // 16) e4m3 held as uint8
+    q_packed: torch.Tensor,  # (R, C // 2) uint8 packed FP4
+    s_dec: torch.Tensor,  # (R, C // 16) e4m3 held as uint8
     outer_amax: torch.Tensor,  # (R,) fp32
 ) -> torch.Tensor:
     """Decode a rowwise FP4 tensor back to fp32 using the kernel's own
@@ -502,9 +503,9 @@ def _dequant_fp4_with_outer_amax(
     # NVFP4 E2M1 LUT (sign-magnitude): 0000..0111 map to {0, 0.5, 1, 1.5,
     # 2, 3, 4, 6}; 1000..1111 are the negatives.
     fp4_lut = torch.tensor(
-        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
-         -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
-        dtype=torch.float32, device=q_packed.device,
+        [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
+        dtype=torch.float32,
+        device=q_packed.device,
     )
     fp4_val = fp4_lut[interleaved.to(torch.int64)]
 
@@ -522,6 +523,7 @@ def _dequant_fp4_with_outer_amax(
 
 # ----- (5a) K1 RHT: standalone amax kernel ----------------------------------
 
+
 @_GATED_SM100
 @pytest.mark.parametrize("M,K", _RHT_SHAPES)
 def test_per_token_k1_with_rht_false_equals_raw_amax(M: int, K: int) -> None:
@@ -534,22 +536,31 @@ def test_per_token_k1_with_rht_false_equals_raw_amax(M: int, K: int) -> None:
     col_amax = torch.empty((K,), dtype=torch.float32, device=device)
 
     tex.nvfp4_per_token_amax(
-        x, row_amax, col_amax, True, True,
-        with_rht=False, random_sign_mask_t=0,
+        x,
+        row_amax,
+        col_amax,
+        True,
+        True,
+        with_rht=False,
+        random_sign_mask_t=0,
     )
 
     ref_row, ref_col = _reference_amax_raw(x)
-    torch.testing.assert_close(row_amax, ref_row, rtol=0.0, atol=0.0,
-                               msg=f"row_amax mismatch at ({M}, {K})")
-    torch.testing.assert_close(col_amax, ref_col, rtol=0.0, atol=0.0,
-                               msg=f"col_amax mismatch at ({M}, {K})")
+    torch.testing.assert_close(
+        row_amax, ref_row, rtol=0.0, atol=0.0, msg=f"row_amax mismatch at ({M}, {K})"
+    )
+    torch.testing.assert_close(
+        col_amax, ref_col, rtol=0.0, atol=0.0, msg=f"col_amax mismatch at ({M}, {K})"
+    )
 
 
 @_GATED_SM100
 @pytest.mark.parametrize("M,K", _RHT_SHAPES)
 @pytest.mark.parametrize("mask", [0x0000, 0xACE1, 0xFFFF, 0x5A5A])
 def test_per_token_k1_with_rht_matches_reference(
-    M: int, K: int, mask: int,
+    M: int,
+    K: int,
+    mask: int,
 ) -> None:
     """with_rht=True col_amax matches max|H*D*x_block|/4; rowwise stays raw."""
     torch.manual_seed(0xDEAD * (M + 7) + (K + 3) + mask)
@@ -560,19 +571,32 @@ def test_per_token_k1_with_rht_matches_reference(
     col_amax = torch.empty((K,), dtype=torch.float32, device=device)
 
     tex.nvfp4_per_token_amax(
-        x, row_amax, col_amax, True, True,
-        with_rht=True, random_sign_mask_t=mask,
+        x,
+        row_amax,
+        col_amax,
+        True,
+        True,
+        with_rht=True,
+        random_sign_mask_t=mask,
     )
 
     ref_row, _ = _reference_amax_raw(x)
-    torch.testing.assert_close(row_amax, ref_row, rtol=0.0, atol=0.0,
-                               msg=f"row_amax mismatch at ({M}, {K}, mask=0x{mask:04X})")
+    torch.testing.assert_close(
+        row_amax,
+        ref_row,
+        rtol=0.0,
+        atol=0.0,
+        msg=f"row_amax mismatch at ({M}, {K}, mask=0x{mask:04X})",
+    )
 
     # Col tolerance accounts for bf16->fp32 promotion noise + butterfly
     # summation order vs. einsum reduction order.
     ref_col = _reference_col_amax_rht(x, mask)
     torch.testing.assert_close(
-        col_amax, ref_col, rtol=2e-3, atol=1e-4,
+        col_amax,
+        ref_col,
+        rtol=2e-3,
+        atol=1e-4,
         msg=f"col_amax (RHT) mismatch at ({M}, {K}, mask=0x{mask:04X})",
     )
 
@@ -589,8 +613,13 @@ def test_per_token_k1_with_rht_zero_mask_is_hadamard_only(M: int, K: int) -> Non
     col_amax = torch.empty((K,), dtype=torch.float32, device=device)
 
     tex.nvfp4_per_token_amax(
-        x, row_amax, col_amax, True, True,
-        with_rht=True, random_sign_mask_t=0,
+        x,
+        row_amax,
+        col_amax,
+        True,
+        True,
+        with_rht=True,
+        random_sign_mask_t=0,
     )
 
     H = _walsh_hadamard_16(device)
@@ -600,12 +629,16 @@ def test_per_token_k1_with_rht_zero_mask_is_hadamard_only(M: int, K: int) -> Non
     ref_col = (rotated.abs() / 4.0).reshape(-1, K).amax(dim=0)
 
     torch.testing.assert_close(
-        col_amax, ref_col, rtol=2e-3, atol=1e-4,
+        col_amax,
+        ref_col,
+        rtol=2e-3,
+        atol=1e-4,
         msg=f"col_amax (RHT, mask=0) mismatch at ({M}, {K})",
     )
 
 
 # ----- (5b) K2 + composite RHT: encode kernel and composite quantize --------
+
 
 @_GATED_SM100
 @pytest.mark.parametrize("M,K", _RHT_SHAPES)
@@ -619,21 +652,34 @@ def test_per_token_composite_with_rht_false_byte_equal(M: int, K: int) -> None:
     bufs_explicit = _allocate_per_token_buffers(M, K, device)
 
     tex.nvfp4_per_token_quantize(
-        x, bufs_default["q_row"], bufs_default["s_row"], bufs_default["ra"],
-        bufs_default["q_col"], bufs_default["s_col"], bufs_default["ca"],
-        True, True,
+        x,
+        bufs_default["q_row"],
+        bufs_default["s_row"],
+        bufs_default["ra"],
+        bufs_default["q_col"],
+        bufs_default["s_col"],
+        bufs_default["ca"],
+        True,
+        True,
     )
     tex.nvfp4_per_token_quantize(
-        x, bufs_explicit["q_row"], bufs_explicit["s_row"], bufs_explicit["ra"],
-        bufs_explicit["q_col"], bufs_explicit["s_col"], bufs_explicit["ca"],
-        True, True,
-        with_rht=False, random_sign_mask_t=0xACE1,
+        x,
+        bufs_explicit["q_row"],
+        bufs_explicit["s_row"],
+        bufs_explicit["ra"],
+        bufs_explicit["q_col"],
+        bufs_explicit["s_col"],
+        bufs_explicit["ca"],
+        True,
+        True,
+        with_rht=False,
+        random_sign_mask_t=0xACE1,
     )
 
     for k in ("q_row", "s_row", "ra", "q_col", "s_col", "ca"):
-        assert torch.equal(bufs_default[k], bufs_explicit[k]), (
-            f"with_rht=False not byte-equal to default path on `{k}` at ({M}, {K})"
-        )
+        assert torch.equal(
+            bufs_default[k], bufs_explicit[k]
+        ), f"with_rht=False not byte-equal to default path on `{k}` at ({M}, {K})"
 
 
 @_GATED_SM100
@@ -648,16 +694,30 @@ def test_per_token_composite_rowwise_unchanged_under_rht(M: int, K: int) -> None
     bufs_with_rht = _allocate_per_token_buffers(M, K, device)
 
     tex.nvfp4_per_token_quantize(
-        x, bufs_no_rht["q_row"], bufs_no_rht["s_row"], bufs_no_rht["ra"],
-        bufs_no_rht["q_col"], bufs_no_rht["s_col"], bufs_no_rht["ca"],
-        True, True,
-        with_rht=False, random_sign_mask_t=0,
+        x,
+        bufs_no_rht["q_row"],
+        bufs_no_rht["s_row"],
+        bufs_no_rht["ra"],
+        bufs_no_rht["q_col"],
+        bufs_no_rht["s_col"],
+        bufs_no_rht["ca"],
+        True,
+        True,
+        with_rht=False,
+        random_sign_mask_t=0,
     )
     tex.nvfp4_per_token_quantize(
-        x, bufs_with_rht["q_row"], bufs_with_rht["s_row"], bufs_with_rht["ra"],
-        bufs_with_rht["q_col"], bufs_with_rht["s_col"], bufs_with_rht["ca"],
-        True, True,
-        with_rht=True, random_sign_mask_t=0xACE1,
+        x,
+        bufs_with_rht["q_row"],
+        bufs_with_rht["s_row"],
+        bufs_with_rht["ra"],
+        bufs_with_rht["q_col"],
+        bufs_with_rht["s_col"],
+        bufs_with_rht["ca"],
+        True,
+        True,
+        with_rht=True,
+        random_sign_mask_t=0xACE1,
     )
 
     for k in ("q_row", "s_row", "ra"):
@@ -671,7 +731,9 @@ def test_per_token_composite_rowwise_unchanged_under_rht(M: int, K: int) -> None
 @pytest.mark.parametrize("M,K", [(128, 128), (256, 512), (512, 512)])
 @pytest.mark.parametrize("mask", [0x0000, 0xACE1, 0xFFFF])
 def test_per_token_composite_with_rht_col_dequant_matches_reference(
-    M: int, K: int, mask: int,
+    M: int,
+    K: int,
+    mask: int,
 ) -> None:
     """Dequant'd col FP4 (with_rht=True) ~ H*D*x_block/sqrt(16); checks
     column-aggregate median + p99 relative error (FP4's 16-code grain and
@@ -685,10 +747,17 @@ def test_per_token_composite_with_rht_col_dequant_matches_reference(
 
     bufs = _allocate_per_token_buffers(M, K, device)
     tex.nvfp4_per_token_quantize(
-        x, bufs["q_row"], bufs["s_row"], bufs["ra"],
-        bufs["q_col"], bufs["s_col"], bufs["ca"],
-        True, True,
-        with_rht=True, random_sign_mask_t=mask,
+        x,
+        bufs["q_row"],
+        bufs["s_row"],
+        bufs["ra"],
+        bufs["q_col"],
+        bufs["s_col"],
+        bufs["ca"],
+        True,
+        True,
+        with_rht=True,
+        random_sign_mask_t=mask,
     )
 
     H = _walsh_hadamard_16(device)
@@ -696,12 +765,14 @@ def test_per_token_composite_with_rht_col_dequant_matches_reference(
     x_fp32 = x.to(torch.float32)
     blocks = x_fp32.reshape(M // 16, 16, K)
     masked = blocks * sign.view(1, 16, 1)
-    rotated = torch.einsum("ij,bjk->bik", H, masked)         # (M/16, 16, K)
-    y_ref = rotated.reshape(M, K) / 4.0                      # (M, K)
-    y_ref_col_view = y_ref.transpose(0, 1).contiguous()      # (K, M)
+    rotated = torch.einsum("ij,bjk->bik", H, masked)  # (M/16, 16, K)
+    y_ref = rotated.reshape(M, K) / 4.0  # (M, K)
+    y_ref_col_view = y_ref.transpose(0, 1).contiguous()  # (K, M)
 
     y_kernel = _dequant_fp4_with_outer_amax(
-        bufs["q_col"], bufs["s_col"], bufs["ca"],
+        bufs["q_col"],
+        bufs["s_col"],
+        bufs["ca"],
     )  # (K, M)
 
     diff = (y_kernel - y_ref_col_view).abs()
@@ -713,16 +784,16 @@ def test_per_token_composite_with_rht_col_dequant_matches_reference(
         f"median per-element relative error too large: {median:.4f} > 0.1 "
         f"at ({M}, {K}, mask=0x{mask:04X})"
     )
-    assert p99 < 0.5, (
-        f"p99 per-element relative error too large: {p99:.4f} > 0.5 "
-        f"at ({M}, {K}, mask=0x{mask:04X})"
-    )
+    assert (
+        p99 < 0.5
+    ), f"p99 per-element relative error too large: {p99:.4f} > 0.5 at ({M}, {K}, mask=0x{mask:04X})"
 
 
 @_GATED_SM100
 @pytest.mark.parametrize("M,K", [(128, 128), (256, 256)])
 def test_per_token_composite_with_rht_col_amax_matches_k1(
-    M: int, K: int,
+    M: int,
+    K: int,
 ) -> None:
     """Composite col_amax byte-equals standalone K1 amax with the same mask."""
     torch.manual_seed(0xDADA * (M + 13) + K)
@@ -732,20 +803,34 @@ def test_per_token_composite_with_rht_col_amax_matches_k1(
 
     bufs = _allocate_per_token_buffers(M, K, device)
     tex.nvfp4_per_token_quantize(
-        x, bufs["q_row"], bufs["s_row"], bufs["ra"],
-        bufs["q_col"], bufs["s_col"], bufs["ca"],
-        True, True,
-        with_rht=True, random_sign_mask_t=mask,
+        x,
+        bufs["q_row"],
+        bufs["s_row"],
+        bufs["ra"],
+        bufs["q_col"],
+        bufs["s_col"],
+        bufs["ca"],
+        True,
+        True,
+        with_rht=True,
+        random_sign_mask_t=mask,
     )
 
     ra_k1 = torch.empty((M,), dtype=torch.float32, device=device)
     ca_k1 = torch.empty((K,), dtype=torch.float32, device=device)
     tex.nvfp4_per_token_amax(
-        x, ra_k1, ca_k1, True, True,
-        with_rht=True, random_sign_mask_t=mask,
+        x,
+        ra_k1,
+        ca_k1,
+        True,
+        True,
+        with_rht=True,
+        random_sign_mask_t=mask,
     )
 
-    torch.testing.assert_close(bufs["ca"], ca_k1, rtol=0.0, atol=0.0,
-                               msg=f"composite ca != K1-only ca at ({M}, {K})")
-    torch.testing.assert_close(bufs["ra"], ra_k1, rtol=0.0, atol=0.0,
-                               msg=f"composite ra != K1-only ra at ({M}, {K})")
+    torch.testing.assert_close(
+        bufs["ca"], ca_k1, rtol=0.0, atol=0.0, msg=f"composite ca != K1-only ca at ({M}, {K})"
+    )
+    torch.testing.assert_close(
+        bufs["ra"], ra_k1, rtol=0.0, atol=0.0, msg=f"composite ra != K1-only ra at ({M}, {K})"
+    )

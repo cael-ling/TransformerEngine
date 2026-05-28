@@ -146,8 +146,9 @@ class NVFP4QuantizerPerTokenRef:
         # kernel. All-zero blocks: s_dec saturates to 0, naive S_enc/0
         # would NaN; short-circuit to 0 to mirror the kernel.
         zero_blk = decode_scale_back_fp32 == 0
-        denom = torch.where(zero_blk, torch.ones_like(decode_scale_back_fp32),
-                            decode_scale_back_fp32)
+        denom = torch.where(
+            zero_blk, torch.ones_like(decode_scale_back_fp32), decode_scale_back_fp32
+        )
         encode_scale = S_enc_per_blk / denom
         encode_scale = torch.where(zero_blk, torch.zeros_like(encode_scale), encode_scale)
         encode_scale = torch.minimum(encode_scale, fp32_max)
@@ -200,19 +201,19 @@ def _validate_per_token_input(x: torch.Tensor) -> Tuple[int, int]:
         )
     M, K = x.shape
     if M % _PER_TOKEN_TILE != 0:
-        raise ValueError(
-            f"Per-token kernel requires M % {_PER_TOKEN_TILE} == 0; got M={M}"
-        )
+        raise ValueError(f"Per-token kernel requires M % {_PER_TOKEN_TILE} == 0; got M={M}")
     if K % _PER_TOKEN_TILE != 0:
-        raise ValueError(
-            f"Per-token kernel requires K % {_PER_TOKEN_TILE} == 0; got K={K}"
-        )
+        raise ValueError(f"Per-token kernel requires K % {_PER_TOKEN_TILE} == 0; got K={K}")
     return M, K
 
 
 def nvfp4_per_token_quantize(
-    x: torch.Tensor, *, rowwise: bool = True, columnwise: bool = False,
-    with_rht: bool = False, random_sign_mask_t: int = 0xACE1,
+    x: torch.Tensor,
+    *,
+    rowwise: bool = True,
+    columnwise: bool = False,
+    with_rht: bool = False,
+    random_sign_mask_t: int = 0xACE1,
 ) -> RefNVFP4TensorPerToken:
     """Production NVFP4 per-token cast through ``tex.nvfp4_per_token_quantize``.
 
@@ -265,8 +266,17 @@ def nvfp4_per_token_quantize(
         q_col, s_dec_col, col_amax = empty, empty, empty_f32
 
     tex.nvfp4_per_token_quantize(
-        x, q_row, s_dec_row, row_amax, q_col, s_dec_col, col_amax, rowwise, columnwise,
-        with_rht=with_rht, random_sign_mask_t=int(random_sign_mask_t) & 0xFFFF,
+        x,
+        q_row,
+        s_dec_row,
+        row_amax,
+        q_col,
+        s_dec_col,
+        col_amax,
+        rowwise,
+        columnwise,
+        with_rht=with_rht,
+        random_sign_mask_t=int(random_sign_mask_t) & 0xFFFF,
     )
 
     out = RefNVFP4TensorPerToken()
@@ -290,9 +300,14 @@ def nvfp4_per_token_quantize(
 # above; the composite handles K1 + K2 ordering on the same stream.
 # ============================================================================
 
+
 def nvfp4_per_token_amax(
-    x: torch.Tensor, *, rowwise: bool = True, columnwise: bool = True,
-    with_rht: bool = False, random_sign_mask_t: int = 0xACE1,
+    x: torch.Tensor,
+    *,
+    rowwise: bool = True,
+    columnwise: bool = True,
+    with_rht: bool = False,
+    random_sign_mask_t: int = 0xACE1,
 ) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
     """Kernel 1 in isolation: per-row + per-col amax via TMA + atomicMax.
     Returns ``(row_amax, col_amax)``; either may be ``None`` if the
@@ -327,8 +342,13 @@ def nvfp4_per_token_amax(
     )
 
     tex.nvfp4_per_token_amax(
-        x, row_amax, col_amax, rowwise, columnwise,
-        with_rht=with_rht, random_sign_mask_t=int(random_sign_mask_t) & 0xFFFF,
+        x,
+        row_amax,
+        col_amax,
+        rowwise,
+        columnwise,
+        with_rht=with_rht,
+        random_sign_mask_t=int(random_sign_mask_t) & 0xFFFF,
     )
 
     return (row_amax if rowwise else None, col_amax if columnwise else None)
@@ -390,8 +410,17 @@ def nvfp4_per_token_encode(
         q_col, s_dec_col, col_amax_t = empty, empty, empty_f32
 
     tex.nvfp4_per_token_encode(
-        x, q_row, s_dec_row, row_amax_t, q_col, s_dec_col, col_amax_t, rowwise, columnwise,
-        with_rht=with_rht, random_sign_mask_t=int(random_sign_mask_t) & 0xFFFF,
+        x,
+        q_row,
+        s_dec_row,
+        row_amax_t,
+        q_col,
+        s_dec_col,
+        col_amax_t,
+        rowwise,
+        columnwise,
+        with_rht=with_rht,
+        random_sign_mask_t=int(random_sign_mask_t) & 0xFFFF,
     )
 
     out = RefNVFP4TensorPerToken()

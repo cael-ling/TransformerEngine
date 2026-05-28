@@ -50,9 +50,7 @@ def _make_baseline_quantizer_list(num_splits: int) -> List[NVFP4Quantizer]:
     return [q] * num_splits
 
 
-def cuda_graph_time_ms(
-    fn: Callable[[], object], *, warmup: int = 5, iters: int = 50
-) -> float:
+def cuda_graph_time_ms(fn: Callable[[], object], *, warmup: int = 5, iters: int = 50) -> float:
     """Median g.replay() time of fn under CUDA Graphs, in ms (nan on capture failure)."""
     try:
         side = torch.cuda.Stream()
@@ -84,14 +82,26 @@ def cuda_graph_time_ms(
 _RHT_MASK_DEFAULT: int = 0xACE1
 
 
-def _time_grouped(x_concat, split_sections, rowwise, columnwise,
-                  *, with_rht: bool = False, mask: int = _RHT_MASK_DEFAULT,
-                  n_iters: int = 20, n_warmup: int = 5) -> float:
+def _time_grouped(
+    x_concat,
+    split_sections,
+    rowwise,
+    columnwise,
+    *,
+    with_rht: bool = False,
+    mask: int = _RHT_MASK_DEFAULT,
+    n_iters: int = 20,
+    n_warmup: int = 5,
+) -> float:
     """Per-token grouped via the BULK Python wrapper. Allocation in-loop."""
     for _ in range(n_warmup):
         _ = nvfp4_per_token_group_quantize(
-            x_concat, split_sections, rowwise=rowwise, columnwise=columnwise,
-            with_rht=with_rht, random_sign_mask_t=mask,
+            x_concat,
+            split_sections,
+            rowwise=rowwise,
+            columnwise=columnwise,
+            with_rht=with_rht,
+            random_sign_mask_t=mask,
         )
     torch.cuda.synchronize()
     start = torch.cuda.Event(enable_timing=True)
@@ -99,8 +109,12 @@ def _time_grouped(x_concat, split_sections, rowwise, columnwise,
     start.record()
     for _ in range(n_iters):
         _ = nvfp4_per_token_group_quantize(
-            x_concat, split_sections, rowwise=rowwise, columnwise=columnwise,
-            with_rht=with_rht, random_sign_mask_t=mask,
+            x_concat,
+            split_sections,
+            rowwise=rowwise,
+            columnwise=columnwise,
+            with_rht=with_rht,
+            random_sign_mask_t=mask,
         )
     stop.record()
     torch.cuda.synchronize()
@@ -122,23 +136,36 @@ def _time_split_quantize(x_concat, split_sections, quantizer_list, n_iters=20, n
     return start.elapsed_time(stop) / n_iters  # ms
 
 
-def _time_split_quantize_graph(x_concat, split_sections, quantizer_list,
-                               n_iters=20, n_warmup=5):
+def _time_split_quantize_graph(x_concat, split_sections, quantizer_list, n_iters=20, n_warmup=5):
     """Per-tensor grouped under CUDA Graphs replay."""
+
     def fn() -> None:
         _ = tex.split_quantize(x_concat, split_sections, quantizer_list)
 
     return cuda_graph_time_ms(fn, warmup=n_warmup, iters=n_iters)
 
 
-def _time_grouped_graph(x_concat, split_sections, rowwise, columnwise,
-                        *, with_rht: bool = False, mask: int = _RHT_MASK_DEFAULT,
-                        n_iters: int = 20, n_warmup: int = 5) -> float:
+def _time_grouped_graph(
+    x_concat,
+    split_sections,
+    rowwise,
+    columnwise,
+    *,
+    with_rht: bool = False,
+    mask: int = _RHT_MASK_DEFAULT,
+    n_iters: int = 20,
+    n_warmup: int = 5,
+) -> float:
     """Per-token grouped under CUDA Graphs replay."""
+
     def fn() -> None:
         _ = nvfp4_per_token_group_quantize(
-            x_concat, split_sections, rowwise=rowwise, columnwise=columnwise,
-            with_rht=with_rht, random_sign_mask_t=mask,
+            x_concat,
+            split_sections,
+            rowwise=rowwise,
+            columnwise=columnwise,
+            with_rht=with_rht,
+            random_sign_mask_t=mask,
         )
 
     return cuda_graph_time_ms(fn, warmup=n_warmup, iters=n_iters)
@@ -175,12 +202,10 @@ def _build_bench_cases(
         if M_i % 128 != 0:
             raise argparse.ArgumentTypeError(
                 f"sum_M={sum_M} / num_splits={num_splits} = M_i={M_i} must be a "
-                f"multiple of 128 (NVFP4 per-token kernel constraint)"
+                "multiple of 128 (NVFP4 per-token kernel constraint)"
             )
         if K % 128 != 0:
-            raise argparse.ArgumentTypeError(
-                f"K={K} must be a multiple of 128"
-            )
+            raise argparse.ArgumentTypeError(f"K={K} must be a multiple of 128")
         cases.append(([M_i] * num_splits, K))
     return cases
 
@@ -193,24 +218,40 @@ def main() -> int:
         )
     )
     parser.add_argument(
-        "--shapes", type=_parse_shape, nargs="+", default=None,
-        help="Shapes to bench, in sum_MxK form (e.g. 8192x4096). "
-             "Default: a 6x3 = 18-row internally-chosen sweep.",
+        "--shapes",
+        type=_parse_shape,
+        nargs="+",
+        default=None,
+        help=(
+            "Shapes to bench, in sum_MxK form (e.g. 8192x4096). "
+            "Default: a 6x3 = 18-row internally-chosen sweep."
+        ),
     )
     parser.add_argument(
-        "--num-splits", type=int, default=_DEFAULT_NUM_SPLITS,
-        help=f"Number of equal splits per shape (default {_DEFAULT_NUM_SPLITS}; "
-             f"<= 64). M_i = sum_M / num_splits must be a multiple of 128.",
+        "--num-splits",
+        type=int,
+        default=_DEFAULT_NUM_SPLITS,
+        help=(
+            f"Number of equal splits per shape (default {_DEFAULT_NUM_SPLITS}; "
+            "<= 64). M_i = sum_M / num_splits must be a multiple of 128."
+        ),
     )
     parser.add_argument(
-        "--rht", action="store_true",
-        help="Enable 3-way table with per-token + col-wise 16-pt RHT path. "
-             "Default OFF prints 2-way (per-token vs per-tensor).",
+        "--rht",
+        action="store_true",
+        help=(
+            "Enable 3-way table with per-token + col-wise 16-pt RHT path. "
+            "Default OFF prints 2-way (per-token vs per-tensor)."
+        ),
     )
     parser.add_argument(
-        "--rht-mask", type=lambda s: int(s, 0), default=_RHT_MASK_DEFAULT,
-        help=f"16-bit RHT sign mask (default 0x{_RHT_MASK_DEFAULT:04X}; accepts "
-             "hex/dec). Only affects per-token+RHT; per-tensor uses its own mask.",
+        "--rht-mask",
+        type=lambda s: int(s, 0),
+        default=_RHT_MASK_DEFAULT,
+        help=(
+            f"16-bit RHT sign mask (default 0x{_RHT_MASK_DEFAULT:04X}; accepts "
+            "hex/dec). Only affects per-token+RHT; per-tensor uses its own mask."
+        ),
     )
     args = parser.parse_args()
 
@@ -228,21 +269,24 @@ def main() -> int:
     if args.shapes is not None:
         shapes_in = [tuple(s) for s in args.shapes]
     else:
-        shapes_in = [
-            (sm, k) for sm in _DEFAULT_SUM_M_VALUES for k in _DEFAULT_K_VALUES
-        ]
+        shapes_in = [(sm, k) for sm in _DEFAULT_SUM_M_VALUES for k in _DEFAULT_K_VALUES]
     bench_cases = _build_bench_cases(shapes_in, args.num_splits)
     rht_mask: int = args.rht_mask & 0xFFFF
     with_rht: bool = args.rht
 
     device = torch.device("cuda")
     print(f"# Device: {torch.cuda.get_device_name(0)}  (cap {cap[0]}.{cap[1]})")
-    print(f"# Split structure: N={args.num_splits} equal splits, "
-          f"M_i = sum_M / {args.num_splits}")
+    print(f"# Split structure: N={args.num_splits} equal splits, M_i = sum_M / {args.num_splits}")
     if with_rht:
-        print(f"# RHT mask: 0x{rht_mask:04X}  (per-token+RHT col-wise; per-tensor uses its own internal mask)")
+        print(
+            f"# RHT mask: 0x{rht_mask:04X}  (per-token+RHT col-wise; per-tensor uses its own"
+            " internal mask)"
+        )
     else:
-        print("# RHT: disabled (pass --rht to enable 3-way per-token / per-token (+rht) / per-tensor table)")
+        print(
+            "# RHT: disabled (pass --rht to enable 3-way per-token / per-token (+rht) / per-tensor"
+            " table)"
+        )
     print()
 
     # Per-tensor baseline quantizer is fixed to row+col, so both enabled.
@@ -263,25 +307,23 @@ def main() -> int:
         w_pt, w_pt_rht, w_pten, w_ratio = 12, 12, 13, 8
         block_w = w_pt + 1 + w_pt_rht + 1 + w_pten + 1 + w_ratio
         header1 = (
-            f"{'':>6} {'':>5}"
-            f" |{'Eager, unit (ms)':^{block_w}}"
-            f" |{'Graph, unit (ms)':^{block_w}}"
+            f"{'':>6} {'':>5} |{'Eager, unit (ms)':^{block_w}} |{'Graph, unit (ms)':^{block_w}}"
         )
         header2 = (
             f"{'sum_M':>6} {'K':>5}"
-            f" |"
+            " |"
             f"{'per-token':>{w_pt}} {'per-token':>{w_pt_rht}}"
             f" {'per-tensor':>{w_pten}} {'ratio':>{w_ratio}}"
-            f" |"
+            " |"
             f"{'per-token':>{w_pt}} {'per-token':>{w_pt_rht}}"
             f" {'per-tensor':>{w_pten}} {'ratio':>{w_ratio}}"
         )
         header3 = (
             f"{'':>6} {'':>5}"
-            f" |"
+            " |"
             f"{'':>{w_pt}} {'(+rht)':>{w_pt_rht}}"
             f" {'':>{w_pten}} {'':>{w_ratio}}"
-            f" |"
+            " |"
             f"{'':>{w_pt}} {'(+rht)':>{w_pt_rht}}"
             f" {'':>{w_pten}} {'':>{w_ratio}}"
         )
@@ -292,15 +334,13 @@ def main() -> int:
         w_pt, w_pten, w_ratio = 14, 15, 8
         block_w = w_pt + 1 + w_pten + 1 + w_ratio
         header1 = (
-            f"{'':>6} {'':>5}"
-            f" |{'Eager, unit (ms)':^{block_w}}"
-            f" |{'Graph, unit (ms)':^{block_w}}"
+            f"{'':>6} {'':>5} |{'Eager, unit (ms)':^{block_w}} |{'Graph, unit (ms)':^{block_w}}"
         )
         header2 = (
             f"{'sum_M':>6} {'K':>5}"
-            f" |"
+            " |"
             f"{'per-token':>{w_pt}} {'per-tensor':>{w_pten}} {'ratio':>{w_ratio}}"
-            f" |"
+            " |"
             f"{'per-token':>{w_pt}} {'per-tensor':>{w_pten}} {'ratio':>{w_ratio}}"
         )
         print(header1)
@@ -317,27 +357,35 @@ def main() -> int:
             print()
         prev_sum_M = sum_M
 
-        x_concat = (
-            torch.randn((sum_M, K), dtype=torch.bfloat16, device=device) * 3.0
-        ).contiguous()
+        x_concat = (torch.randn((sum_M, K), dtype=torch.bfloat16, device=device) * 3.0).contiguous()
         quantizer_list = _make_baseline_quantizer_list(num_splits)
 
-        t_pt = _time_grouped(x_concat, split_sections, rowwise, columnwise,
-                             with_rht=False)
+        t_pt = _time_grouped(x_concat, split_sections, rowwise, columnwise, with_rht=False)
         t_pten = _time_split_quantize(x_concat, split_sections, quantizer_list)
         t_pt_g = _time_grouped_graph(
-            x_concat, split_sections, rowwise, columnwise, with_rht=False,
+            x_concat,
+            split_sections,
+            rowwise,
+            columnwise,
+            with_rht=False,
         )
         t_pten_g = _time_split_quantize_graph(
-            x_concat, split_sections, quantizer_list,
+            x_concat,
+            split_sections,
+            quantizer_list,
         )
 
         if with_rht:
-            t_pt_rht = _time_grouped(x_concat, split_sections, rowwise, columnwise,
-                                     with_rht=True, mask=rht_mask)
+            t_pt_rht = _time_grouped(
+                x_concat, split_sections, rowwise, columnwise, with_rht=True, mask=rht_mask
+            )
             t_pt_rht_g = _time_grouped_graph(
-                x_concat, split_sections, rowwise, columnwise,
-                with_rht=True, mask=rht_mask,
+                x_concat,
+                split_sections,
+                rowwise,
+                columnwise,
+                with_rht=True,
+                mask=rht_mask,
             )
 
             ratio_eager = _ratio(t_pt_rht, t_pten)
@@ -345,10 +393,10 @@ def main() -> int:
 
             print(
                 f"{sum_M:>6d} {K:>5d}"
-                f" |"
+                " |"
                 f"{t_pt:>{w_pt}.4f} {t_pt_rht:>{w_pt_rht}.4f}"
                 f" {t_pten:>{w_pten}.4f} {_fmt(ratio_eager):>{w_ratio}}"
-                f" |"
+                " |"
                 f"{t_pt_g:>{w_pt}.4f} {t_pt_rht_g:>{w_pt_rht}.4f}"
                 f" {t_pten_g:>{w_pten}.4f} {_fmt(ratio_graph):>{w_ratio}}"
             )
@@ -357,9 +405,9 @@ def main() -> int:
             ratio_graph = _ratio(t_pt_g, t_pten_g)
             print(
                 f"{sum_M:>6d} {K:>5d}"
-                f" |"
+                " |"
                 f"{t_pt:>{w_pt}.4f} {t_pten:>{w_pten}.4f} {_fmt(ratio_eager):>{w_ratio}}"
-                f" |"
+                " |"
                 f"{t_pt_g:>{w_pt}.4f} {t_pten_g:>{w_pten}.4f} {_fmt(ratio_graph):>{w_ratio}}"
             )
 
@@ -372,24 +420,38 @@ def main() -> int:
         print("  per-token (ms)         = nvfp4_per_token_group_quantize(x, splits,")
         print("                           rowwise+colwise, with_rht=False)")
         print("                           = K1 fused amax + K2 fused cast (2 launches), no RHT.")
-        print(f"  per-token (+rht) (ms)  = same, but with_rht=True + random_sign_mask_t=0x{rht_mask:04X}.")
+        print(
+            "  per-token (+rht) (ms)  = same, but with_rht=True +"
+            f" random_sign_mask_t=0x{rht_mask:04X}."
+        )
         print("                           Applies a 16-point RHT along the columnwise direction in")
         print("                           BOTH K1 amax and K2 cast; rowwise stays raw. Length-16")
         print("                           matches the 1x16 inner-SF block of NVFP4, so each scale")
         print("                           window is decorrelated.")
-        print("  per-tensor (ms)        = tex.split_quantize(x, splits, [NVFP4Quantizer(rht+sr)]*N)")
+        print(
+            "  per-tensor (ms)        = tex.split_quantize(x, splits, [NVFP4Quantizer(rht+sr)]*N)"
+        )
         print("                           = nvte_group_hadamard_transform_amax")
         print("                           + nvte_group_hadamard_transform_cast_fusion")
         print("                           (2 launches, prod baseline).")
         print("  ratio                  = per-token (+rht) / per-tensor")
         print("                           ** < 1.0 = this PR wins vs prod baseline **")
     else:
-        print("  per-token (ms)  = nvfp4_per_token_group_quantize(x, splits, rowwise+colwise, with_rht=False)")
+        print(
+            "  per-token (ms)  = nvfp4_per_token_group_quantize(x, splits, rowwise+colwise,"
+            " with_rht=False)"
+        )
         print("                    = K1 fused amax + K2 fused cast (2 launches), no RHT.")
         print("  per-tensor (ms) = tex.split_quantize(x, splits, [NVFP4Quantizer(rht+sr)]*N)")
         print("                    = nvte_group_hadamard_transform_amax")
-        print("                    + nvte_group_hadamard_transform_cast_fusion (2 launches, prod baseline).")
-        print("  ratio           = per-token / per-tensor   ** < 1.0 = per-token wins vs prod baseline **")
+        print(
+            "                    + nvte_group_hadamard_transform_cast_fusion (2 launches, prod"
+            " baseline)."
+        )
+        print(
+            "  ratio           = per-token / per-tensor   ** < 1.0 = per-token wins vs prod"
+            " baseline **"
+        )
     print("  (Graph) suffix    = same under CUDA Graphs replay (Python + alloc elided).")
     return 0
 
