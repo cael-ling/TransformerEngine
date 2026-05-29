@@ -590,9 +590,8 @@ __global__ void __launch_bounds__(THREADS_NUM)
       const uint32_t packed_lo = static_cast<uint32_t>(packed_all);
       const uint32_t packed_hi = static_cast<uint32_t>(packed_all >> 32);
 
-      const size_t base_byte = M_tile_idx * CHUNK_DIM_Y * scale_stride +
-                               K_tile_global_base * 512 + static_cast<size_t>(ty) * 16 +
-                               static_cast<size_t>(b) * 4;
+      const size_t base_byte = M_tile_idx * CHUNK_DIM_Y * scale_stride + K_tile_global_base * 512 +
+                               static_cast<size_t>(ty) * 16 + static_cast<size_t>(b) * 4;
       *reinterpret_cast<uint32_t*>(&scales_ptr[base_byte]) = packed_lo;
       *reinterpret_cast<uint32_t*>(&scales_ptr[base_byte + 512]) = packed_hi;
     } else {
@@ -604,8 +603,7 @@ __global__ void __launch_bounds__(THREADS_NUM)
         const size_t row_global = scales_block_offset_Y_rowwise + row;
         if (row_global < rows) {
           ScalesVec& scales_vec = *reinterpret_cast<ScalesVec*>(sSFrowwise[row]);
-          const size_t scale_idx_global =
-              row_global * scale_stride + scales_block_offset_X_rowwise;
+          const size_t scale_idx_global = row_global * scale_stride + scales_block_offset_X_rowwise;
           scales_vec.store_to_elts(&scales_ptr[scale_idx_global], 0, count);
         }
       }
@@ -1001,8 +999,7 @@ inline void launch_encode(const Tensor& input, Tensor* output, const Tensor& noo
                                      dshmem_size);
                 kernel<<<grid, block, dshmem_size, stream>>>(
                     tmap_in, tmap_out, tmap_out_t, scales_ptr, scales_t_ptr, row_amax_in,
-                    col_amax_in, noop_ptr, M, K, scale_stride, scale_stride_t,
-                    random_sign_mask_t);
+                    col_amax_in, noop_ptr, M, K, scale_stride, scale_stride_t, random_sign_mask_t);
               }))));
   NVTE_CHECK_CUDA(cudaGetLastError());
 }

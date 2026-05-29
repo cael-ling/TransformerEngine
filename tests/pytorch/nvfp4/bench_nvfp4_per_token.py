@@ -296,8 +296,15 @@ def _bench_shape_e2e_swizzle(
 
     def _pt_quant(t, qr, sr, ra_buf, qc, sc, ca_buf, *, fused_swizzle: bool):
         tex.nvfp4_per_token_quantize(
-            t, qr, sr, ra_buf, qc, sc, ca_buf,
-            True, True,  # rowwise + columnwise (apples-to-apples vs per-tensor)
+            t,
+            qr,
+            sr,
+            ra_buf,
+            qc,
+            sc,
+            ca_buf,
+            True,
+            True,  # rowwise + columnwise (apples-to-apples vs per-tensor)
             with_rht=with_rht,
             random_sign_mask_t=mask_t if with_rht else 0,
             with_swizzle=fused_swizzle,
@@ -307,18 +314,42 @@ def _bench_shape_e2e_swizzle(
         _pt_quant(a, a_qr, a_sr, a_ra, a_qc, a_sc, a_ca, fused_swizzle=False)
         _pt_quant(b, b_qr, b_sr, b_ra, b_qc, b_sc, b_ca, fused_swizzle=False)
         tex.nvfp4_per_token_gemm(
-            a_qr, b_qr, a_sr.reshape(-1), b_sr.reshape(-1),
-            a_ra, b_ra, d, workspace, M, N, K, 1.0, 0.0,
-            a_sf_swizzled=False, b_sf_swizzled=False,
+            a_qr,
+            b_qr,
+            a_sr.reshape(-1),
+            b_sr.reshape(-1),
+            a_ra,
+            b_ra,
+            d,
+            workspace,
+            M,
+            N,
+            K,
+            1.0,
+            0.0,
+            a_sf_swizzled=False,
+            b_sf_swizzled=False,
         )
 
     def _pt_e2e_fused_swizzle():
         _pt_quant(a, a_qr, a_sr, a_ra, a_qc, a_sc, a_ca, fused_swizzle=True)
         _pt_quant(b, b_qr, b_sr, b_ra, b_qc, b_sc, b_ca, fused_swizzle=True)
         tex.nvfp4_per_token_gemm(
-            a_qr, b_qr, a_sr.reshape(-1), b_sr.reshape(-1),
-            a_ra, b_ra, d, workspace, M, N, K, 1.0, 0.0,
-            a_sf_swizzled=True, b_sf_swizzled=True,
+            a_qr,
+            b_qr,
+            a_sr.reshape(-1),
+            b_sr.reshape(-1),
+            a_ra,
+            b_ra,
+            d,
+            workspace,
+            M,
+            N,
+            K,
+            1.0,
+            0.0,
+            a_sf_swizzled=True,
+            b_sf_swizzled=True,
         )
 
     # Per-tensor path: NVFP4Quantizer (RHT+SR) + bench-only nvfp4_per_tensor_gemm.
@@ -330,10 +361,19 @@ def _bench_shape_e2e_swizzle(
         tex.quantize(a, quantizer, dst_a, None)
         tex.quantize(b, quantizer, dst_b, None)
         tex.nvfp4_per_tensor_gemm(
-            dst_a._rowwise_data, dst_b._rowwise_data,
-            dst_a._rowwise_scale_inv, dst_b._rowwise_scale_inv,
-            dst_a._amax_rowwise, dst_b._amax_rowwise,
-            d, workspace, M, N, K, 1.0, 0.0,
+            dst_a._rowwise_data,
+            dst_b._rowwise_data,
+            dst_a._rowwise_scale_inv,
+            dst_b._rowwise_scale_inv,
+            dst_a._amax_rowwise,
+            dst_b._amax_rowwise,
+            d,
+            workspace,
+            M,
+            N,
+            K,
+            1.0,
+            0.0,
         )
 
     t_pt = cuda_time_ms(_pt_e2e_ext_swizzle)
@@ -344,9 +384,14 @@ def _bench_shape_e2e_swizzle(
     t_pten_g = cuda_graph_time_ms(_pten_e2e)
 
     return E2EShapeBench(
-        M=M, K=K,
-        t_pt=t_pt, t_pt_swz=t_pt_swz, t_pten=t_pten,
-        t_pt_g=t_pt_g, t_pt_swz_g=t_pt_swz_g, t_pten_g=t_pten_g,
+        M=M,
+        K=K,
+        t_pt=t_pt,
+        t_pt_swz=t_pt_swz,
+        t_pten=t_pten,
+        t_pt_g=t_pt_g,
+        t_pt_swz_g=t_pt_swz_g,
+        t_pten_g=t_pten_g,
     )
 
 
@@ -388,20 +433,30 @@ def _bench_shape_qs(
 
     def _pt_quant(t, qr, sr, ra_buf, qc, sc, ca_buf):
         tex.nvfp4_per_token_quantize(
-            t, qr, sr, ra_buf, qc, sc, ca_buf,
-            True, True,
+            t,
+            qr,
+            sr,
+            ra_buf,
+            qc,
+            sc,
+            ca_buf,
+            True,
+            True,
             with_rht=with_rht,
             random_sign_mask_t=mask_t if with_rht else 0,
             with_swizzle=False,  # explicit external swizzle, see below
         )
 
     if pair:
+
         def _pt_qs():
             _pt_quant(a, a_qr, a_sr, a_ra, a_qc, a_sc, a_ca)
             _pt_quant(b, b_qr, b_sr, b_ra, b_qc, b_sc, b_ca)
             tex.nvfp4_per_token_swizzle_rowwise_sf(a_qr, a_sr.reshape(-1), a_sr_swz)
             tex.nvfp4_per_token_swizzle_rowwise_sf(b_qr, b_sr.reshape(-1), b_sr_swz)
+
     else:
+
         def _pt_qs():
             _pt_quant(a, a_qr, a_sr, a_ra, a_qc, a_sc, a_ca)
             tex.nvfp4_per_token_swizzle_rowwise_sf(a_qr, a_sr.reshape(-1), a_sr_swz)
@@ -417,6 +472,7 @@ def _bench_shape_qs(
         )
 
     if pair:
+
         def _pten_qs():
             tex.quantize(a, quantizer, dst_a, None)
             tex.quantize(b, quantizer, dst_b, None)
@@ -426,7 +482,9 @@ def _bench_shape_qs(
             tex.nvfp4_per_token_swizzle_rowwise_sf(
                 dst_b._rowwise_data, dst_b._rowwise_scale_inv.reshape(-1), pten_b_sr_swz
             )
+
     else:
+
         def _pten_qs():
             tex.quantize(a, quantizer, dst_a, None)
             tex.nvfp4_per_token_swizzle_rowwise_sf(
@@ -450,18 +508,28 @@ def _bench_shape_qs(
 
         def _pt_quant_fused(t, qr, sr, ra_buf, qc, sc, ca_buf):
             tex.nvfp4_per_token_quantize(
-                t, qr, sr, ra_buf, qc, sc, ca_buf,
-                True, True,
+                t,
+                qr,
+                sr,
+                ra_buf,
+                qc,
+                sc,
+                ca_buf,
+                True,
+                True,
                 with_rht=with_rht,
                 random_sign_mask_t=mask_t if with_rht else 0,
                 with_swizzle=True,  # <-- fused: K2 emits swizzled rowwise SF
             )
 
         if pair:
+
             def _pt_qs_fused():
                 _pt_quant_fused(a, a_qr_f, a_sr_f, a_ra_f, a_qc_f, a_sc_f, a_ca_f)
                 _pt_quant_fused(b, b_qr_f, b_sr_f, b_ra_f, b_qc_f, b_sc_f, b_ca_f)
+
         else:
+
             def _pt_qs_fused():
                 _pt_quant_fused(a, a_qr_f, a_sr_f, a_ra_f, a_qc_f, a_sc_f, a_ca_f)
 
@@ -469,8 +537,14 @@ def _bench_shape_qs(
         t_pt_swz_g = cuda_graph_time_ms(_pt_qs_fused)
 
     return QSShapeBench(
-        M=M, K=K, t_pt=t_pt, t_pten=t_pten, t_pt_g=t_pt_g, t_pten_g=t_pten_g,
-        t_pt_swz=t_pt_swz, t_pt_swz_g=t_pt_swz_g,
+        M=M,
+        K=K,
+        t_pt=t_pt,
+        t_pten=t_pten,
+        t_pt_g=t_pt_g,
+        t_pten_g=t_pten_g,
+        t_pt_swz=t_pt_swz,
+        t_pt_swz_g=t_pt_swz_g,
     )
 
 
@@ -484,7 +558,9 @@ def _print_qs_table(records: List[QSShapeBench], *, fuse: bool) -> None:
     if not fuse:
         w_pt, w_pten, w_ratio = 14, 15, 8
         block_w = w_pt + 1 + w_pten + 1 + w_ratio
-        header1 = f"{'':>7} {'':>6} |{'Eager, unit (ms)':^{block_w}} |{'Graph, unit (ms)':^{block_w}}"
+        header1 = (
+            f"{'':>7} {'':>6} |{'Eager, unit (ms)':^{block_w}} |{'Graph, unit (ms)':^{block_w}}"
+        )
         header2 = (
             f"{'M':>7} {'K':>6}"
             " |"
@@ -562,9 +638,8 @@ def _print_qs_legend(*, with_rht: bool, rht_mask: int, pair: bool, fuse: bool) -
     n_launches_ext = 3 * n_tensors  # K1+K2+swz per tensor
     n_launches_fused = 2 * n_tensors  # K1+K2 only per tensor (swizzle folded into K2)
     mode_tag = "--pair, 2 operands" if pair else "default solo, 1 operand"
-    n_kernels_tag = (
-        f"ext-swz pipeline {n_launches_ext} launches"
-        + (f" / fused pipeline {n_launches_fused} launches" if fuse else "")
+    n_kernels_tag = f"ext-swz pipeline {n_launches_ext} launches" + (
+        f" / fused pipeline {n_launches_fused} launches" if fuse else ""
     )
     print(f"Legend (K1+K2 + rowwise swizzle; NO GEMM; mode = {mode_tag}; {n_kernels_tag}):")
     rht_suffix = (
@@ -602,17 +677,10 @@ def _print_qs_legend(*, with_rht: bool, rht_mask: int, pair: bool, fuse: bool) -
         print("  The (fuse) column saves 1 swizzle launch/operand vs the non-fuse column;")
         print("  the K2 byte-output is identical (verified by pytest byte-equality test).")
     if not pair:
-        print(
-            "  solo mode is apples-to-apples with --composite (also 1 operand): the delta"
-        )
-        print(
-            "  per-token(--qs) - per-token(--composite) ~= one nvte_swizzle launch."
-        )
+        print("  solo mode is apples-to-apples with --composite (also 1 operand): the delta")
+        print("  per-token(--qs) - per-token(--composite) ~= one nvte_swizzle launch.")
     else:
-        print(
-            "  --pair mode = one prod NVFP4 GEMM call's quant+swizzle pipeline "
-            "(1 swz/operand)."
-        )
+        print("  --pair mode = one prod NVFP4 GEMM call's quant+swizzle pipeline (1 swz/operand).")
     if fuse:
         print("  ratio                 = per-token(fuse) / per-tensor")
     else:
@@ -1133,8 +1201,13 @@ def main() -> int:
     elif args.qs:
         records_qs: List[QSShapeBench] = [
             _bench_shape_qs(
-                M, K, device=device, with_rht=args.rht, mask_t=mask,
-                pair=args.pair, fuse=args.fuse,
+                M,
+                K,
+                device=device,
+                with_rht=args.rht,
+                mask_t=mask,
+                pair=args.pair,
+                fuse=args.fuse,
             )
             for (M, K) in shapes
         ]

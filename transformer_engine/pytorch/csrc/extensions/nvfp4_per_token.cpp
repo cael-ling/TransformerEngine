@@ -124,8 +124,8 @@ void nvfp4_per_token_quantize(const at::Tensor& input, at::Tensor q_row, at::Ten
   if (with_swizzle) out_te.set_with_gemm_swizzled_scales(true);
   const auto stream = at::cuda::getCurrentCUDAStream();
   nvte_nvfp4_per_token_quantize(in_te.data(), nullptr, out_te.data(), with_rht ? 1 : 0,
-                                static_cast<int>(random_sign_mask_t & 0xFFFF),
-                                with_swizzle ? 1 : 0, stream);
+                                static_cast<int>(random_sign_mask_t & 0xFFFF), with_swizzle ? 1 : 0,
+                                stream);
 }
 
 // K1-only (diagnostic / bench): populates only amax buffers. with_rht=true
@@ -159,8 +159,8 @@ void nvfp4_per_token_encode(const at::Tensor& input, at::Tensor q_row, at::Tenso
   if (with_swizzle) out_te.set_with_gemm_swizzled_scales(true);
   const auto stream = at::cuda::getCurrentCUDAStream();
   nvte_nvfp4_per_token_encode(in_te.data(), nullptr, out_te.data(), with_rht ? 1 : 0,
-                              static_cast<int>(random_sign_mask_t & 0xFFFF),
-                              with_swizzle ? 1 : 0, stream);
+                              static_cast<int>(random_sign_mask_t & 0xFFFF), with_swizzle ? 1 : 0,
+                              stream);
 }
 
 // Apply per-token post-scale to a GEMM output (see nvfp4_per_token.h for math).
@@ -209,8 +209,8 @@ void nvfp4_per_token_swizzle_rowwise_sf(const at::Tensor& data, const at::Tensor
   TORCH_CHECK(sf_in.scalar_type() == at::ScalarType::Byte, "sf_in must be uint8 (FP8 e4m3)");
   TORCH_CHECK(sf_out.scalar_type() == at::ScalarType::Byte, "sf_out must be uint8 (FP8 e4m3)");
   TORCH_CHECK(data.dim() == 2, "data must be 2D (M, K/2)");
-  TORCH_CHECK(sf_in.numel() == sf_out.numel(),
-              "sf_in/sf_out numel mismatch: ", sf_in.numel(), " vs ", sf_out.numel());
+  TORCH_CHECK(sf_in.numel() == sf_out.numel(), "sf_in/sf_out numel mismatch: ", sf_in.numel(),
+              " vs ", sf_out.numel());
 
   const int64_t m = data.size(0);
   const int64_t k = data.size(1) * 2;  // FP4 packed

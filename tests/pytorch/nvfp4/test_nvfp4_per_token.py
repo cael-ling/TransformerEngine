@@ -937,19 +937,31 @@ def test_per_token_gemm_with_fused_swizzle_matches_unswizzled(M: int, K: int) ->
     a_plain = nvfp4_per_token_quantize(A, rowwise=True, columnwise=False, with_swizzle=False)
     b_plain = nvfp4_per_token_quantize(B, rowwise=True, columnwise=False, with_swizzle=False)
     c_unswz = nvfp4_per_token_gemm(
-        a_plain.data, a_plain.scale, a_plain.row_amax,
-        b_plain.data, b_plain.scale, b_plain.row_amax,
+        a_plain.data,
+        a_plain.scale,
+        a_plain.row_amax,
+        b_plain.data,
+        b_plain.scale,
+        b_plain.row_amax,
     )
 
     a_swz = nvfp4_per_token_quantize(A, rowwise=True, columnwise=False, with_swizzle=True)
     b_swz = nvfp4_per_token_quantize(B, rowwise=True, columnwise=False, with_swizzle=True)
     c_swz = nvfp4_per_token_gemm(
-        a_swz.data, a_swz.scale, a_swz.row_amax,
-        b_swz.data, b_swz.scale, b_swz.row_amax,
-        a_sf_swizzled=True, b_sf_swizzled=True,
+        a_swz.data,
+        a_swz.scale,
+        a_swz.row_amax,
+        b_swz.data,
+        b_swz.scale,
+        b_swz.row_amax,
+        a_sf_swizzled=True,
+        b_sf_swizzled=True,
     )
 
     torch.testing.assert_close(
-        c_swz, c_unswz, rtol=0, atol=0,
+        c_swz,
+        c_unswz,
+        rtol=0,
+        atol=0,
         msg=f"fused-swizzle GEMM output != unswizzled-input GEMM at ({M}, {K})",
     )
