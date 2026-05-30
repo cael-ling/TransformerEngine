@@ -51,18 +51,32 @@ def _quantize_per_token(
     s_col = torch.empty(0, dtype=torch.uint8, device=x.device)
     a_col = torch.empty(0, dtype=torch.float32, device=x.device)
     tex.nvfp4_per_token_quantize(
-        x, q_row, s_row, a_row, q_col, s_col, a_col,
-        rowwise=True, columnwise=False, with_rht=False,
-        random_sign_mask_t=int(0xACE1), with_swizzle=False,
+        x,
+        q_row,
+        s_row,
+        a_row,
+        q_col,
+        s_col,
+        a_col,
+        rowwise=True,
+        columnwise=False,
+        with_rht=False,
+        random_sign_mask_t=int(0xACE1),
+        with_swizzle=False,
     )
     return q_row, s_row, a_row
 
 
 def _ref_pertoken_gemm_via_cublaslt(
-    a_q: torch.Tensor, b_q: torch.Tensor,
-    a_sf: torch.Tensor, b_sf: torch.Tensor,
-    alpha_a: torch.Tensor, alpha_b: torch.Tensor,
-    M: int, N: int, K: int,
+    a_q: torch.Tensor,
+    b_q: torch.Tensor,
+    a_sf: torch.Tensor,
+    b_sf: torch.Tensor,
+    alpha_a: torch.Tensor,
+    alpha_b: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
 ) -> torch.Tensor:
     """Reference: tex.nvfp4_per_token_gemm = cuBLAS-LT NVFP4 GEMM + standalone
     post-scale. Already correctness-tested in test_nvfp4_per_token.py.
@@ -70,39 +84,61 @@ def _ref_pertoken_gemm_via_cublaslt(
     workspace = torch.empty(33_554_432, dtype=torch.uint8, device=a_q.device)
     d = torch.empty((M, N), dtype=torch.bfloat16, device=a_q.device)
     tex.nvfp4_per_token_gemm(
-        a_q, b_q,
-        a_sf.reshape(-1), b_sf.reshape(-1),
-        alpha_a, alpha_b,
-        d, workspace, M, N, K, 1.0, 0.0,
-        a_sf_swizzled=False, b_sf_swizzled=False,
+        a_q,
+        b_q,
+        a_sf.reshape(-1),
+        b_sf.reshape(-1),
+        alpha_a,
+        alpha_b,
+        d,
+        workspace,
+        M,
+        N,
+        K,
+        1.0,
+        0.0,
+        a_sf_swizzled=False,
+        b_sf_swizzled=False,
     )
     return d
 
 
 def _run_fused(
-    a_q: torch.Tensor, b_q: torch.Tensor,
-    a_sf: torch.Tensor, b_sf: torch.Tensor,
-    alpha_a: torch.Tensor, alpha_b: torch.Tensor,
-    M: int, N: int, K: int,
+    a_q: torch.Tensor,
+    b_q: torch.Tensor,
+    a_sf: torch.Tensor,
+    b_sf: torch.Tensor,
+    alpha_a: torch.Tensor,
+    alpha_b: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
 ) -> torch.Tensor:
     d = torch.empty((M, N), dtype=torch.bfloat16, device=a_q.device)
     tex.nvfp4_cutlass_per_token_gemm(
-        a_q, b_q,
-        a_sf.reshape(-1), b_sf.reshape(-1),
-        alpha_a, alpha_b,
-        d, M, N, K,
-        a_sf_swizzled=False, b_sf_swizzled=False,
+        a_q,
+        b_q,
+        a_sf.reshape(-1),
+        b_sf.reshape(-1),
+        alpha_a,
+        alpha_b,
+        d,
+        M,
+        N,
+        K,
+        a_sf_swizzled=False,
+        b_sf_swizzled=False,
     )
     return d
 
 
 # Shapes obey the kernel contract (M, N, K all multiples of 256).
 _SHAPES = [
-    (256, 256, 256),    # smallest legal shape
+    (256, 256, 256),  # smallest legal shape
     (512, 256, 256),
     (256, 512, 256),
     (256, 256, 512),
-    (512, 1024, 768),   # not power-of-2 K
+    (512, 1024, 768),  # not power-of-2 K
     (1024, 1024, 1024),
 ]
 
@@ -126,10 +162,26 @@ def test_fused_matches_cublaslt_per_token(M: int, N: int, K: int) -> None:
     # so the difference is purely in the GEMM kernel and the order of the
     # per-row * per-col fold (epilogue vs separate kernel).
     d_ref = _ref_pertoken_gemm_via_cublaslt(
-        a_q, b_q, a_sf, b_sf, a_row_amax, b_row_amax, M, N, K,
+        a_q,
+        b_q,
+        a_sf,
+        b_sf,
+        a_row_amax,
+        b_row_amax,
+        M,
+        N,
+        K,
     )
     d_fused = _run_fused(
-        a_q, b_q, a_sf, b_sf, a_row_amax, b_row_amax, M, N, K,
+        a_q,
+        b_q,
+        a_sf,
+        b_sf,
+        a_row_amax,
+        b_row_amax,
+        M,
+        N,
+        K,
     )
 
     # Float32 view for comparison; bf16 ULP is 2^-7 = 7.8e-3 relative.
@@ -181,18 +233,30 @@ def test_fused_alpha_unity_matches_scalar_gemm_with_baked_const() -> None:
 
     d_scalar = torch.empty((M, N), dtype=torch.bfloat16, device=device)
     tex.nvfp4_cutlass_gemm(
-        a_q, b_q,
-        a_sf.reshape(-1), b_sf.reshape(-1),
-        d_scalar, M, N, K, NVFP4_DEQUANT_K, 0.0,
-        a_sf_swizzled=False, b_sf_swizzled=False,
+        a_q,
+        b_q,
+        a_sf.reshape(-1),
+        b_sf.reshape(-1),
+        d_scalar,
+        M,
+        N,
+        K,
+        NVFP4_DEQUANT_K,
+        0.0,
+        a_sf_swizzled=False,
+        b_sf_swizzled=False,
     )
 
     # Exact match (any deviation = EVT bug).
     torch.testing.assert_close(
-        d_fused.float(), d_scalar.float(),
-        rtol=0.0, atol=0.0,
-        msg=("Fused EVT with unity alpha + baked 1/2688^2 must match "
-             "nvfp4_cutlass_gemm(alpha=1/2688^2) bit-exact."),
+        d_fused.float(),
+        d_scalar.float(),
+        rtol=0.0,
+        atol=0.0,
+        msg=(
+            "Fused EVT with unity alpha + baked 1/2688^2 must match "
+            "nvfp4_cutlass_gemm(alpha=1/2688^2) bit-exact."
+        ),
     )
 
 

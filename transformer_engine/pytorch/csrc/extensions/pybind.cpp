@@ -425,20 +425,17 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "nvfp4_per_token_post_scale to get a CUTLASS-based per-token GEMM. "
         "a_sf_swizzled / b_sf_swizzled = true skip the internal swizzle for "
         "bench parity with the cuBLAS LT path.",
-        py::arg("a_data"), py::arg("b_data"), py::arg("a_sf"), py::arg("b_sf"),
-        py::arg("d"), py::arg("m"), py::arg("n"), py::arg("k"),
-        py::arg("alpha"), py::arg("beta"),
+        py::arg("a_data"), py::arg("b_data"), py::arg("a_sf"), py::arg("b_sf"), py::arg("d"),
+        py::arg("m"), py::arg("n"), py::arg("k"), py::arg("alpha"), py::arg("beta"),
         py::arg("a_sf_swizzled") = false, py::arg("b_sf_swizzled") = false);
-  m.def("nvfp4_cutlass_per_token_gemm",
-        &transformer_engine::pytorch::nvfp4_cutlass_per_token_gemm,
+  m.def("nvfp4_cutlass_per_token_gemm", &transformer_engine::pytorch::nvfp4_cutlass_per_token_gemm,
         "Forked CUTLASS NVFP4 GEMM with per-token rescale fused into the "
         "epilogue: D = bf16(alpha_a[i] * alpha_b[j] * (A @ B^T)[i, j]). One "
         "launch, no separate post-scale kernel. alpha_a (M,) and alpha_b (N,) "
         "are fp32 outer-scale vectors. a_sf_swizzled / b_sf_swizzled = true "
         "skip the internal swizzle for bench parity.",
-        py::arg("a_data"), py::arg("b_data"), py::arg("a_sf"), py::arg("b_sf"),
-        py::arg("alpha_a"), py::arg("alpha_b"), py::arg("d"),
-        py::arg("m"), py::arg("n"), py::arg("k"),
+        py::arg("a_data"), py::arg("b_data"), py::arg("a_sf"), py::arg("b_sf"), py::arg("alpha_a"),
+        py::arg("alpha_b"), py::arg("d"), py::arg("m"), py::arg("n"), py::arg("k"),
         py::arg("a_sf_swizzled") = false, py::arg("b_sf_swizzled") = false);
   m.def("nvfp4_per_token_post_scale", &transformer_engine::pytorch::nvfp4_per_token_post_scale,
         "Apply d[i,j] *= row_amax_a[i] * row_amax_b[j] in-place on bf16 D.", py::arg("d"),
@@ -463,8 +460,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "a_sf_swizzled/b_sf_swizzled=True skips that operand's swizzle.",
         py::arg("a_data"), py::arg("b_data"), py::arg("a_sf"), py::arg("b_sf"), py::arg("a_amax"),
         py::arg("b_amax"), py::arg("d"), py::arg("workspace"), py::arg("m"), py::arg("n"),
-        py::arg("k"), py::arg("alpha"), py::arg("beta"),
-        py::arg("a_sf_swizzled") = false, py::arg("b_sf_swizzled") = false);
+        py::arg("k"), py::arg("alpha"), py::arg("beta"), py::arg("a_sf_swizzled") = false,
+        py::arg("b_sf_swizzled") = false);
   m.def("nvfp4_per_token_group_quantize",
         &transformer_engine::pytorch::nvfp4_per_token_group_quantize,
         "Grouped (multi-tensor) NVFP4 per-token cast: K1 + K2 across <= 64 splits "

@@ -14,20 +14,19 @@
 
 #include "../common.h"
 #include "../util/logging.h"
-
 #include "cute/tensor.hpp"
 #include "cutlass/cutlass.h"
-#include "cutlass/numeric_types.h"
-#include "cutlass/gemm/dispatch_policy.hpp"
-#include "cutlass/gemm/collective/collective_builder.hpp"
+#include "cutlass/detail/sm100_blockscaled_layout.hpp"
 #include "cutlass/epilogue/collective/collective_builder.hpp"
-#include "cutlass/epilogue/fusion/sm90_visitor_tma_warpspecialized.hpp"
 #include "cutlass/epilogue/fusion/sm90_visitor_compute_tma_warpspecialized.hpp"
 #include "cutlass/epilogue/fusion/sm90_visitor_load_tma_warpspecialized.hpp"
+#include "cutlass/epilogue/fusion/sm90_visitor_tma_warpspecialized.hpp"
 #include "cutlass/functional.h"
-#include "cutlass/detail/sm100_blockscaled_layout.hpp"
+#include "cutlass/gemm/collective/collective_builder.hpp"
 #include "cutlass/gemm/device/gemm_universal_adapter.h"
+#include "cutlass/gemm/dispatch_policy.hpp"
 #include "cutlass/gemm/kernel/gemm_universal.hpp"
+#include "cutlass/numeric_types.h"
 #include "cutlass/util/packed_stride.hpp"
 
 namespace transformer_engine {
@@ -40,16 +39,16 @@ namespace cute_ = cute;
 // CUTLASS GEMM type config (mirrors 72a). BF16 output matches the production
 // TE NVFP4 GEMM (cublasLt path), making this a drop-in at the GEMM boundary.
 
-using ElementA   = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
+using ElementA = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
 using LayoutATag = cutlass::layout::RowMajor;
 constexpr int AlignmentA = 32;
 
-using ElementB   = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
+using ElementB = cutlass::nv_float4_t<cutlass::float_e2m1_t>;
 using LayoutBTag = cutlass::layout::ColumnMajor;
 constexpr int AlignmentB = 32;
 
-using ElementC   = cutlass::bfloat16_t;
-using ElementD   = cutlass::bfloat16_t;
+using ElementC = cutlass::bfloat16_t;
+using ElementD = cutlass::bfloat16_t;
 using LayoutCTag = cutlass::layout::RowMajor;
 using LayoutDTag = cutlass::layout::RowMajor;
 // CUTLASS epilogue uses 128-bit vector loads/stores; bf16 packs 8 elts/128b.
@@ -57,36 +56,28 @@ constexpr int AlignmentC = 128 / cutlass::sizeof_bits<ElementC>::value;
 constexpr int AlignmentD = 128 / cutlass::sizeof_bits<ElementD>::value;
 
 using ElementAccumulator = float;
-using ArchTag            = cutlass::arch::Sm100;
-using OperatorClass      = cutlass::arch::OpClassBlockScaledTensorOp;
+using ArchTag = cutlass::arch::Sm100;
+using OperatorClass = cutlass::arch::OpClassBlockScaledTensorOp;
 
 using MmaTileShape = cute_::Shape<cute_::_128, cute_::_128, cute_::_256>;
 using ClusterShape = cute_::Shape<cute_::_1, cute_::_1, cute_::_1>;
 
 using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
-    ArchTag, OperatorClass,
-    MmaTileShape, ClusterShape,
-    cutlass::epilogue::collective::EpilogueTileAuto,
-    ElementAccumulator, ElementAccumulator,
-    ElementC, LayoutCTag, AlignmentC,
-    ElementD, LayoutDTag, AlignmentD,
+    ArchTag, OperatorClass, MmaTileShape, ClusterShape,
+    cutlass::epilogue::collective::EpilogueTileAuto, ElementAccumulator, ElementAccumulator,
+    ElementC, LayoutCTag, AlignmentC, ElementD, LayoutDTag, AlignmentD,
     cutlass::epilogue::collective::EpilogueScheduleAuto>::CollectiveOp;
 
 using CollectiveMainloop = typename cutlass::gemm::collective::CollectiveBuilder<
-    ArchTag, OperatorClass,
-    ElementA, LayoutATag, AlignmentA,
-    ElementB, LayoutBTag, AlignmentB,
-    ElementAccumulator,
-    MmaTileShape, ClusterShape,
-    cutlass::gemm::collective::StageCountAutoCarveout<
-        static_cast<int>(sizeof(typename CollectiveEpilogue::SharedStorage))>,
+    ArchTag, OperatorClass, ElementA, LayoutATag, AlignmentA, ElementB, LayoutBTag, AlignmentB,
+    ElementAccumulator, MmaTileShape, ClusterShape,
+    cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
+        sizeof(typename CollectiveEpilogue::SharedStorage))>,
     cutlass::gemm::collective::KernelScheduleAuto>::CollectiveOp;
 
-using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-    cute_::Shape<int, int, int, int>,
-    CollectiveMainloop,
-    CollectiveEpilogue,
-    void>;
+using GemmKernel =
+    cutlass::gemm::kernel::GemmUniversal<cute_::Shape<int, int, int, int>, CollectiveMainloop,
+                                         CollectiveEpilogue, void>;
 
 using Gemm = cutlass::gemm::device::GemmUniversalAdapter<GemmKernel>;
 
@@ -97,40 +88,37 @@ using StrideD = typename Gemm::GemmKernel::StrideD;
 
 using LayoutSFA = typename Gemm::GemmKernel::CollectiveMainloop::LayoutSFA;
 using LayoutSFB = typename Gemm::GemmKernel::CollectiveMainloop::LayoutSFB;
-using Sm1xxBlkScaledConfig =
-    typename Gemm::GemmKernel::CollectiveMainloop::Sm1xxBlkScaledConfig;
+using Sm1xxBlkScaledConfig = typename Gemm::GemmKernel::CollectiveMainloop::Sm1xxBlkScaledConfig;
 
-using ElementADataPtr   = typename ElementA::DataType const*;
-using ElementBDataPtr   = typename ElementB::DataType const*;
-using ElementASfPtr     = typename ElementA::ScaleFactorType const*;
-using ElementBSfPtr     = typename ElementB::ScaleFactorType const*;
+using ElementADataPtr = typename ElementA::DataType const*;
+using ElementBDataPtr = typename ElementB::DataType const*;
+using ElementASfPtr = typename ElementA::ScaleFactorType const*;
+using ElementBSfPtr = typename ElementB::ScaleFactorType const*;
 
 // Core launcher (scalar alpha/beta).
 
-static void run_cutlass_gemm(void const* a_data_ptr, void const* b_data_ptr,
-                             void const* a_sf_ptr, void const* b_sf_ptr, void* d_ptr,
-                             int M, int N, int K, float alpha, float beta,
-                             cudaStream_t stream) {
+static void run_cutlass_gemm(void const* a_data_ptr, void const* b_data_ptr, void const* a_sf_ptr,
+                             void const* b_sf_ptr, void* d_ptr, int M, int N, int K, float alpha,
+                             float beta, cudaStream_t stream) {
   auto stride_A = cutlass::make_cute_packed_stride(StrideA{}, {M, K, 1});
   auto stride_B = cutlass::make_cute_packed_stride(StrideB{}, {N, K, 1});
   auto stride_C = cutlass::make_cute_packed_stride(StrideC{}, {M, N, 1});
   auto stride_D = cutlass::make_cute_packed_stride(StrideD{}, {M, N, 1});
 
-  auto layout_SFA = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFA(
-      cute_::make_shape(M, N, K, 1));
-  auto layout_SFB = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFB(
-      cute_::make_shape(M, N, K, 1));
+  auto layout_SFA = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFA(cute_::make_shape(M, N, K, 1));
+  auto layout_SFB = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFB(cute_::make_shape(M, N, K, 1));
 
-  typename Gemm::Arguments args{
-      cutlass::gemm::GemmUniversalMode::kGemm,
-      {M, N, K, 1},
-      {reinterpret_cast<ElementADataPtr>(a_data_ptr), stride_A,
-       reinterpret_cast<ElementBDataPtr>(b_data_ptr), stride_B,
-       reinterpret_cast<ElementASfPtr>(a_sf_ptr), layout_SFA,
-       reinterpret_cast<ElementBSfPtr>(b_sf_ptr), layout_SFB},
-      {{alpha, beta},
-       reinterpret_cast<ElementC const*>(d_ptr), stride_C,
-       reinterpret_cast<ElementD*>(d_ptr), stride_D}};
+  typename Gemm::Arguments args{cutlass::gemm::GemmUniversalMode::kGemm,
+                                {M, N, K, 1},
+                                {reinterpret_cast<ElementADataPtr>(a_data_ptr), stride_A,
+                                 reinterpret_cast<ElementBDataPtr>(b_data_ptr), stride_B,
+                                 reinterpret_cast<ElementASfPtr>(a_sf_ptr), layout_SFA,
+                                 reinterpret_cast<ElementBSfPtr>(b_sf_ptr), layout_SFB},
+                                {{alpha, beta},
+                                 reinterpret_cast<ElementC const*>(d_ptr),
+                                 stride_C,
+                                 reinterpret_cast<ElementD*>(d_ptr),
+                                 stride_D}};
 
   Gemm gemm;
 
@@ -143,13 +131,12 @@ static void run_cutlass_gemm(void const* a_data_ptr, void const* b_data_ptr,
 
   cutlass::Status status = gemm.can_implement(args);
   NVTE_CHECK(status == cutlass::Status::kSuccess,
-             "CUTLASS NVFP4 GEMM cannot implement: ",
-             cutlassGetStatusString(status), " (M=", M, " N=", N, " K=", K, ")");
+             "CUTLASS NVFP4 GEMM cannot implement: ", cutlassGetStatusString(status), " (M=", M,
+             " N=", N, " K=", K, ")");
 
   status = gemm.initialize(args, workspace, stream);
   NVTE_CHECK(status == cutlass::Status::kSuccess,
-             "CUTLASS NVFP4 GEMM initialize failed: ",
-             cutlassGetStatusString(status));
+             "CUTLASS NVFP4 GEMM initialize failed: ", cutlassGetStatusString(status));
 
   status = gemm.run(stream);
   NVTE_CHECK(status == cutlass::Status::kSuccess,
@@ -203,16 +190,14 @@ using ColScaleNode = fusion::Sm90RowBroadcast<
 using ConstScaleNode = fusion::Sm90ScalarBroadcast<ElementScale>;
 
 // L1: tmp1 = alpha_a[i] * acc.
-using MulAccByRowEVT = fusion::Sm90EVT<
-    fusion::Sm90Compute<cutlass::multiplies, ElementAccumulator, ElementAccumulator,
-                        kRoundStyleFused>,
-    RowScaleNode, AccFetchNode>;
+using MulAccByRowEVT = fusion::Sm90EVT<fusion::Sm90Compute<cutlass::multiplies, ElementAccumulator,
+                                                           ElementAccumulator, kRoundStyleFused>,
+                                       RowScaleNode, AccFetchNode>;
 
 // L2: tmp2 = alpha_b[j] * tmp1 (still fp32; bf16 cast deferred to L3).
-using MulByColEVT = fusion::Sm90EVT<
-    fusion::Sm90Compute<cutlass::multiplies, ElementAccumulator, ElementAccumulator,
-                        kRoundStyleFused>,
-    ColScaleNode, MulAccByRowEVT>;
+using MulByColEVT = fusion::Sm90EVT<fusion::Sm90Compute<cutlass::multiplies, ElementAccumulator,
+                                                        ElementAccumulator, kRoundStyleFused>,
+                                    ColScaleNode, MulAccByRowEVT>;
 
 // L3: D = bf16(NVFP4_DEQUANT_K * tmp2). ElementD=bf16 forces round-to-nearest.
 using FusedEVT = fusion::Sm90EVT<
@@ -220,30 +205,21 @@ using FusedEVT = fusion::Sm90EVT<
     ConstScaleNode, MulByColEVT>;
 
 using CollectiveEpilogueFused = typename cutlass::epilogue::collective::CollectiveBuilder<
-    ArchTag, OperatorClass,
-    MmaTileShape, ClusterShape,
-    cutlass::epilogue::collective::EpilogueTileAuto,
-    ElementAccumulator, ElementAccumulator,
-    ElementC, LayoutCTag, AlignmentC,
-    ElementD, LayoutDTag, AlignmentD,
-    cutlass::epilogue::collective::EpilogueScheduleAuto,
-    FusedEVT>::CollectiveOp;
+    ArchTag, OperatorClass, MmaTileShape, ClusterShape,
+    cutlass::epilogue::collective::EpilogueTileAuto, ElementAccumulator, ElementAccumulator,
+    ElementC, LayoutCTag, AlignmentC, ElementD, LayoutDTag, AlignmentD,
+    cutlass::epilogue::collective::EpilogueScheduleAuto, FusedEVT>::CollectiveOp;
 
 using CollectiveMainloopFused = typename cutlass::gemm::collective::CollectiveBuilder<
-    ArchTag, OperatorClass,
-    ElementA, LayoutATag, AlignmentA,
-    ElementB, LayoutBTag, AlignmentB,
-    ElementAccumulator,
-    MmaTileShape, ClusterShape,
-    cutlass::gemm::collective::StageCountAutoCarveout<
-        static_cast<int>(sizeof(typename CollectiveEpilogueFused::SharedStorage))>,
+    ArchTag, OperatorClass, ElementA, LayoutATag, AlignmentA, ElementB, LayoutBTag, AlignmentB,
+    ElementAccumulator, MmaTileShape, ClusterShape,
+    cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(
+        sizeof(typename CollectiveEpilogueFused::SharedStorage))>,
     cutlass::gemm::collective::KernelScheduleAuto>::CollectiveOp;
 
-using GemmKernelFused = cutlass::gemm::kernel::GemmUniversal<
-    cute_::Shape<int, int, int, int>,
-    CollectiveMainloopFused,
-    CollectiveEpilogueFused,
-    void>;
+using GemmKernelFused =
+    cutlass::gemm::kernel::GemmUniversal<cute_::Shape<int, int, int, int>, CollectiveMainloopFused,
+                                         CollectiveEpilogueFused, void>;
 
 using GemmFused = cutlass::gemm::device::GemmUniversalAdapter<GemmKernelFused>;
 
@@ -256,10 +232,8 @@ static void run_cutlass_per_token_gemm(void const* a_data_ptr, void const* b_dat
   auto stride_C = cutlass::make_cute_packed_stride(StrideC{}, {M, N, 1});
   auto stride_D = cutlass::make_cute_packed_stride(StrideD{}, {M, N, 1});
 
-  auto layout_SFA = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFA(
-      cute_::make_shape(M, N, K, 1));
-  auto layout_SFB = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFB(
-      cute_::make_shape(M, N, K, 1));
+  auto layout_SFA = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFA(cute_::make_shape(M, N, K, 1));
+  auto layout_SFB = Sm1xxBlkScaledConfig::tile_atom_to_shape_SFB(cute_::make_shape(M, N, K, 1));
 
   // EVT args order = children first, then this node's args (empty for
   // Sm90Compute<multiplies>). Sm90ScalarBroadcast<float> has 3 ARRAY fields
@@ -314,9 +288,9 @@ static void run_cutlass_per_token_gemm(void const* a_data_ptr, void const* b_dat
              cutlassGetStatusString(status), " (M=", M, " N=", N, " K=", K, ")");
 
   status = gemm.initialize(args, workspace, stream);
-  NVTE_CHECK(status == cutlass::Status::kSuccess,
-             "CUTLASS NVFP4 per-token fused GEMM initialize failed: ",
-             cutlassGetStatusString(status));
+  NVTE_CHECK(
+      status == cutlass::Status::kSuccess,
+      "CUTLASS NVFP4 per-token fused GEMM initialize failed: ", cutlassGetStatusString(status));
 
   status = gemm.run(stream);
   NVTE_CHECK(status == cutlass::Status::kSuccess,
@@ -339,11 +313,11 @@ void nvte_nvfp4_cutlass_gemm(const NVTETensor a_data, const NVTETensor b_data,
                              float alpha, float beta, cudaStream_t stream) {
   using namespace transformer_engine;
 
-  auto* a_t  = convertNVTETensorCheck(a_data);
-  auto* b_t  = convertNVTETensorCheck(b_data);
+  auto* a_t = convertNVTETensorCheck(a_data);
+  auto* b_t = convertNVTETensorCheck(b_data);
   auto* sa_t = convertNVTETensorCheck(a_sf);
   auto* sb_t = convertNVTETensorCheck(b_sf);
-  auto* d_t  = convertNVTETensorCheck(d);
+  auto* d_t = convertNVTETensorCheck(d);
 
   // Logical shapes are interpreted in elements (FP4 storage is packed 2/byte).
   const auto a_shape = a_t->data.shape;
@@ -380,7 +354,7 @@ void nvte_nvfp4_cutlass_gemm(const NVTETensor a_data, const NVTETensor b_data,
 
 #if defined(CUTLASS_ARCH_MMA_SM100_SUPPORTED)
   nvfp4_cutlass::run_cutlass_gemm(a_t->data.dptr, b_t->data.dptr, sa_t->data.dptr, sb_t->data.dptr,
-                               d_t->data.dptr, M, N, K, alpha, beta, stream);
+                                  d_t->data.dptr, M, N, K, alpha, beta, stream);
 #else
   NVTE_ERROR(
       "CUTLASS NVFP4 GEMM requires SM100 (Blackwell). Build with the sm_100a/sm_100f arch flag.");
@@ -393,13 +367,13 @@ void nvte_nvfp4_cutlass_per_token_gemm(const NVTETensor a_data, const NVTETensor
                                        NVTETensor d, cudaStream_t stream) {
   using namespace transformer_engine;
 
-  auto* a_t  = convertNVTETensorCheck(a_data);
-  auto* b_t  = convertNVTETensorCheck(b_data);
+  auto* a_t = convertNVTETensorCheck(a_data);
+  auto* b_t = convertNVTETensorCheck(b_data);
   auto* sa_t = convertNVTETensorCheck(a_sf);
   auto* sb_t = convertNVTETensorCheck(b_sf);
   auto* aa_t = convertNVTETensorCheck(alpha_a);
   auto* ab_t = convertNVTETensorCheck(alpha_b);
-  auto* d_t  = convertNVTETensorCheck(d);
+  auto* d_t = convertNVTETensorCheck(d);
 
   const auto a_shape = a_t->data.shape;
   const auto b_shape = b_t->data.shape;
@@ -431,10 +405,10 @@ void nvte_nvfp4_cutlass_per_token_gemm(const NVTETensor a_data, const NVTETensor
   // alpha_a/b accepted as 1D or (M,1)/(N,1); only element count is validated.
   const size_t aa_numel = aa_t->data.numel();
   const size_t ab_numel = ab_t->data.numel();
-  NVTE_CHECK(aa_numel == static_cast<size_t>(M),
-             "alpha_a must have M=", M, " elements, got ", aa_numel);
-  NVTE_CHECK(ab_numel == static_cast<size_t>(N),
-             "alpha_b must have N=", N, " elements, got ", ab_numel);
+  NVTE_CHECK(aa_numel == static_cast<size_t>(M), "alpha_a must have M=", M, " elements, got ",
+             aa_numel);
+  NVTE_CHECK(ab_numel == static_cast<size_t>(N), "alpha_b must have N=", N, " elements, got ",
+             ab_numel);
 
   NVTE_CHECK(M > 0 && N > 0 && K > 0, "M, N, K must be positive");
   NVTE_CHECK(M % 256 == 0 && N % 256 == 0 && K % 256 == 0,
@@ -445,8 +419,7 @@ void nvte_nvfp4_cutlass_per_token_gemm(const NVTETensor a_data, const NVTETensor
   nvfp4_cutlass::run_cutlass_per_token_gemm(
       a_t->data.dptr, b_t->data.dptr, sa_t->data.dptr, sb_t->data.dptr,
       reinterpret_cast<float const*>(aa_t->data.dptr),
-      reinterpret_cast<float const*>(ab_t->data.dptr),
-      d_t->data.dptr, M, N, K, stream);
+      reinterpret_cast<float const*>(ab_t->data.dptr), d_t->data.dptr, M, N, K, stream);
 #else
   NVTE_ERROR(
       "CUTLASS NVFP4 per-token fused GEMM requires SM100 (Blackwell). Build with sm_100a/sm_100f.");

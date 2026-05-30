@@ -457,11 +457,9 @@ void mxfp8_scaling_partial_cast(const at::Tensor &input, at::Tensor output_rowwi
 // (same trick the cuBLAS LT per-token path uses). a_sf_swizzled / b_sf_swizzled
 // = true skip the corresponding internal swizzle and consume already-swizzled
 // SFs directly (apples-to-apples vs cuBLAS LT in --gemm-only).
-void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
-                        const at::Tensor &a_sf, const at::Tensor &b_sf,
-                        at::Tensor d, int64_t m, int64_t n, int64_t k,
-                        double alpha, double beta,
-                        bool a_sf_swizzled, bool b_sf_swizzled);
+void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data, const at::Tensor &a_sf,
+                        const at::Tensor &b_sf, at::Tensor d, int64_t m, int64_t n, int64_t k,
+                        double alpha, double beta, bool a_sf_swizzled, bool b_sf_swizzled);
 
 // CUTLASS NVFP4 GEMM with per-token rescale fused into the epilogue:
 //   D[i, j] = bf16(alpha_a[i] * alpha_b[j] * (A @ B^T)[i, j])
@@ -470,8 +468,8 @@ void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
 void nvfp4_cutlass_per_token_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
                                   const at::Tensor &a_sf, const at::Tensor &b_sf,
                                   const at::Tensor &alpha_a, const at::Tensor &alpha_b,
-                                  at::Tensor d, int64_t m, int64_t n, int64_t k,
-                                  bool a_sf_swizzled, bool b_sf_swizzled);
+                                  at::Tensor d, int64_t m, int64_t n, int64_t k, bool a_sf_swizzled,
+                                  bool b_sf_swizzled);
 
 // with_swizzle=true makes K2 write rowwise scale_inv in the cuBLAS LT
 // swizzled tile layout (skips the standalone nvte_swizzle_scaling_factors).

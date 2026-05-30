@@ -11,13 +11,12 @@
 
 namespace transformer_engine::pytorch {
 
-void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
-                        const at::Tensor &a_sf, const at::Tensor &b_sf, at::Tensor d, int64_t m,
-                        int64_t n, int64_t k, double alpha, double beta,
-                        bool a_sf_swizzled, bool b_sf_swizzled) {
-  TORCH_CHECK(a_data.is_cuda() && b_data.is_cuda() && a_sf.is_cuda() && b_sf.is_cuda() &&
-                  d.is_cuda(),
-              "All tensors must be CUDA tensors");
+void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data, const at::Tensor &a_sf,
+                        const at::Tensor &b_sf, at::Tensor d, int64_t m, int64_t n, int64_t k,
+                        double alpha, double beta, bool a_sf_swizzled, bool b_sf_swizzled) {
+  TORCH_CHECK(
+      a_data.is_cuda() && b_data.is_cuda() && a_sf.is_cuda() && b_sf.is_cuda() && d.is_cuda(),
+      "All tensors must be CUDA tensors");
   TORCH_CHECK(a_data.is_contiguous() && b_data.is_contiguous() && a_sf.is_contiguous() &&
                   b_sf.is_contiguous() && d.is_contiguous(),
               "All tensors must be contiguous");
@@ -41,9 +40,8 @@ void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
   TORCH_CHECK(b_data.size(0) == n && b_data.size(1) * 2 == k,
               "b_data storage shape mismatch: expected (N=", n, ", K/2=", k / 2, "), got (",
               b_data.size(0), ", ", b_data.size(1), ")");
-  TORCH_CHECK(d.size(0) == m && d.size(1) == n,
-              "d shape mismatch: expected (M=", m, ", N=", n, "), got (", d.size(0), ", ",
-              d.size(1), ")");
+  TORCH_CHECK(d.size(0) == m && d.size(1) == n, "d shape mismatch: expected (M=", m, ", N=", n,
+              "), got (", d.size(0), ", ", d.size(1), ")");
 
   // CUTLASS NVFP4 mainloop wants SF in SM100 Sm1xxBlkScaledConfig layout;
   // swizzle internally so the caller can pass linear (M, K/16) too.
@@ -108,14 +106,11 @@ void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
   TensorWrapper b_te =
       makeTransformerEngineTensor(b_data.data_ptr(), b_data_shape, DType::kFloat4E2M1);
   TensorWrapper a_sf_te = makeTransformerEngineTensor(
-      a_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(a_sf.numel())},
-      DType::kFloat8E4M3);
+      a_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(a_sf.numel())}, DType::kFloat8E4M3);
   TensorWrapper b_sf_te = makeTransformerEngineTensor(
-      b_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(b_sf.numel())},
-      DType::kFloat8E4M3);
+      b_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(b_sf.numel())}, DType::kFloat8E4M3);
   TensorWrapper d_te = makeTransformerEngineTensor(
-      d.data_ptr(),
-      std::vector<size_t>{static_cast<size_t>(m), static_cast<size_t>(n)},
+      d.data_ptr(), std::vector<size_t>{static_cast<size_t>(m), static_cast<size_t>(n)},
       DType::kBFloat16);
 
   nvte_nvfp4_cutlass_gemm(a_te.data(), b_te.data(), a_sf_te.data(), b_sf_te.data(), d_te.data(),
@@ -128,8 +123,8 @@ void nvfp4_cutlass_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
 void nvfp4_cutlass_per_token_gemm(const at::Tensor &a_data, const at::Tensor &b_data,
                                   const at::Tensor &a_sf, const at::Tensor &b_sf,
                                   const at::Tensor &alpha_a, const at::Tensor &alpha_b,
-                                  at::Tensor d, int64_t m, int64_t n, int64_t k,
-                                  bool a_sf_swizzled, bool b_sf_swizzled) {
+                                  at::Tensor d, int64_t m, int64_t n, int64_t k, bool a_sf_swizzled,
+                                  bool b_sf_swizzled) {
   TORCH_CHECK(a_data.is_cuda() && b_data.is_cuda() && a_sf.is_cuda() && b_sf.is_cuda() &&
                   alpha_a.is_cuda() && alpha_b.is_cuda() && d.is_cuda(),
               "All tensors must be CUDA tensors");
@@ -155,9 +150,8 @@ void nvfp4_cutlass_per_token_gemm(const at::Tensor &a_data, const at::Tensor &b_
   TORCH_CHECK(b_data.size(0) == n && b_data.size(1) * 2 == k,
               "b_data storage shape mismatch: expected (N=", n, ", K/2=", k / 2, "), got (",
               b_data.size(0), ", ", b_data.size(1), ")");
-  TORCH_CHECK(d.size(0) == m && d.size(1) == n,
-              "d shape mismatch: expected (M=", m, ", N=", n, "), got (", d.size(0), ", ",
-              d.size(1), ")");
+  TORCH_CHECK(d.size(0) == m && d.size(1) == n, "d shape mismatch: expected (M=", m, ", N=", n,
+              "), got (", d.size(0), ", ", d.size(1), ")");
   TORCH_CHECK(alpha_a.numel() == m, "alpha_a must have M=", m, " elements, got ", alpha_a.numel());
   TORCH_CHECK(alpha_b.numel() == n, "alpha_b must have N=", n, " elements, got ", alpha_b.numel());
 
@@ -214,18 +208,15 @@ void nvfp4_cutlass_per_token_gemm(const at::Tensor &a_data, const at::Tensor &b_
   TensorWrapper b_te =
       makeTransformerEngineTensor(b_data.data_ptr(), b_data_shape, DType::kFloat4E2M1);
   TensorWrapper a_sf_te = makeTransformerEngineTensor(
-      a_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(a_sf.numel())},
-      DType::kFloat8E4M3);
+      a_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(a_sf.numel())}, DType::kFloat8E4M3);
   TensorWrapper b_sf_te = makeTransformerEngineTensor(
-      b_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(b_sf.numel())},
-      DType::kFloat8E4M3);
+      b_sf_swz_ptr, std::vector<size_t>{static_cast<size_t>(b_sf.numel())}, DType::kFloat8E4M3);
   TensorWrapper aa_te = makeTransformerEngineTensor(
       alpha_a.data_ptr(), std::vector<size_t>{static_cast<size_t>(m)}, DType::kFloat32);
   TensorWrapper ab_te = makeTransformerEngineTensor(
       alpha_b.data_ptr(), std::vector<size_t>{static_cast<size_t>(n)}, DType::kFloat32);
   TensorWrapper d_te = makeTransformerEngineTensor(
-      d.data_ptr(),
-      std::vector<size_t>{static_cast<size_t>(m), static_cast<size_t>(n)},
+      d.data_ptr(), std::vector<size_t>{static_cast<size_t>(m), static_cast<size_t>(n)},
       DType::kBFloat16);
 
   nvte_nvfp4_cutlass_per_token_gemm(a_te.data(), b_te.data(), a_sf_te.data(), b_sf_te.data(),

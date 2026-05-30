@@ -464,13 +464,31 @@ def _bench_shape_gemm_only(
     empty_u8 = torch.empty(0, dtype=torch.uint8, device=device)
     empty_f32 = torch.empty(0, dtype=torch.float32, device=device)
     tex.nvfp4_per_token_quantize(
-        a, a_qr, a_sr, a_ra, empty_u8, empty_u8, empty_f32, True, False,
-        with_rht=with_rht, random_sign_mask_t=mask_t if with_rht else 0,
+        a,
+        a_qr,
+        a_sr,
+        a_ra,
+        empty_u8,
+        empty_u8,
+        empty_f32,
+        True,
+        False,
+        with_rht=with_rht,
+        random_sign_mask_t=mask_t if with_rht else 0,
         with_swizzle=True,
     )
     tex.nvfp4_per_token_quantize(
-        b, b_qr, b_sr, b_ra, empty_u8, empty_u8, empty_f32, True, False,
-        with_rht=with_rht, random_sign_mask_t=mask_t if with_rht else 0,
+        b,
+        b_qr,
+        b_sr,
+        b_ra,
+        empty_u8,
+        empty_u8,
+        empty_f32,
+        True,
+        False,
+        with_rht=with_rht,
+        random_sign_mask_t=mask_t if with_rht else 0,
         with_swizzle=True,
     )
     a_sr_flat = a_sr.reshape(-1)
@@ -493,11 +511,21 @@ def _bench_shape_gemm_only(
 
     def _pten_gemm():
         tex.nvfp4_per_tensor_gemm(
-            dst_a._rowwise_data, dst_b._rowwise_data,
-            pten_a_sr_swz, pten_b_sr_swz,
-            dst_a._amax_rowwise, dst_b._amax_rowwise,
-            d, workspace, M, N, K, 1.0, 0.0,
-            a_sf_swizzled=True, b_sf_swizzled=True,
+            dst_a._rowwise_data,
+            dst_b._rowwise_data,
+            pten_a_sr_swz,
+            pten_b_sr_swz,
+            dst_a._amax_rowwise,
+            dst_b._amax_rowwise,
+            d,
+            workspace,
+            M,
+            N,
+            K,
+            1.0,
+            0.0,
+            a_sf_swizzled=True,
+            b_sf_swizzled=True,
         )
 
     # Forked CUTLASS NVFP4 GEMM with per-row * per-col rescale fused INTO the
@@ -507,9 +535,18 @@ def _bench_shape_gemm_only(
 
     def _cutlass_fused():
         tex.nvfp4_cutlass_per_token_gemm(
-            a_qr, b_qr, a_sr_flat, b_sr_flat,
-            a_ra, b_ra, d_clf, M, N, K,
-            a_sf_swizzled=True, b_sf_swizzled=True,
+            a_qr,
+            b_qr,
+            a_sr_flat,
+            b_sr_flat,
+            a_ra,
+            b_ra,
+            d_clf,
+            M,
+            N,
+            K,
+            a_sf_swizzled=True,
+            b_sf_swizzled=True,
         )
 
     t_pten = cuda_time_ms(_pten_gemm)
@@ -518,9 +555,13 @@ def _bench_shape_gemm_only(
     t_clf_g = cuda_graph_time_ms(_cutlass_fused)
 
     return GemmOnlyShapeBench(
-        M=M, K=K, N=N,
-        t_pten=t_pten, t_clf=t_clf,
-        t_pten_g=t_pten_g, t_clf_g=t_clf_g,
+        M=M,
+        K=K,
+        N=N,
+        t_pten=t_pten,
+        t_clf=t_clf,
+        t_pten_g=t_pten_g,
+        t_clf_g=t_clf_g,
     )
 
 
@@ -902,12 +943,8 @@ def _print_gemm_only_table(records: List[GemmOnlyShapeBench]) -> None:
     """
     w_pten, w_clf, w_ratio = 11, 11, 8
     block_w = w_pten + 1 + w_clf + 1 + w_ratio
-    header1 = (
-        f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
-    )
-    body = (
-        f"{'pten_gemm':>{w_pten}} {'ct_fused':>{w_clf}} {'cf/pten':>{w_ratio}}"
-    )
+    header1 = f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
+    body = f"{'pten_gemm':>{w_pten}} {'ct_fused':>{w_clf}} {'cf/pten':>{w_ratio}}"
     header2 = f"{'M':>7} {'K':>6} {'N':>6} |{body}|{body}"
     print(header1)
     print(header2)
@@ -921,7 +958,7 @@ def _print_gemm_only_table(records: List[GemmOnlyShapeBench]) -> None:
         if prev_M is not None and rec.M != prev_M:
             print()
         prev_M = rec.M
-        r_cf   = _ratio(rec.t_clf, rec.t_pten)
+        r_cf = _ratio(rec.t_clf, rec.t_pten)
         r_cf_g = _ratio(rec.t_clf_g, rec.t_pten_g)
         print(
             f"{rec.M:>7} {rec.K:>6} {rec.N:>6}"
