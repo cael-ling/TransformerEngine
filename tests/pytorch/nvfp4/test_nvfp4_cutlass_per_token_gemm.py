@@ -411,7 +411,7 @@ def test_e2e_fwd_per_token_vs_bf16_ground_truth(M: int, N: int, K: int) -> None:
     # well above measured noise, well below the ~1.0 plumbing-break signature.
     assert snr["rel_l2"] < 0.30, (
         f"per-token + fused EVT rel_l2={snr['rel_l2']:.4f} exceeds 0.30 "
-        f"-- accuracy regression in quant or GEMM kernel."
+        "-- accuracy regression in quant or GEMM kernel."
     )
 
 
@@ -444,9 +444,9 @@ def test_prod_fwd_weight_2d_quant_plumbing() -> None:
     # ceiling: well above the ~0.18 fluctuation window, well below the ~1.0
     # signature of "output is unrelated to input".
     assert snr["rel_l2"] < 0.30, (
-        f"prod fwd (input 1D+RHT, weight 2D no-RHT) rel_l2="
+        "prod fwd (input 1D+RHT, weight 2D no-RHT) rel_l2="
         f"{snr['rel_l2']:.4f} exceeds 0.30 -- pipeline-level bug "
-        f"(general_gemm dispatch, NVFP4Quantizer plumbing, or 2D SF swizzle)."
+        "(general_gemm dispatch, NVFP4Quantizer plumbing, or 2D SF swizzle)."
     )
 
 
@@ -466,8 +466,12 @@ _LAYER3_REL_L2_HARD_FLOOR = 0.30
 def _quantize_per_token_dual(
     x: torch.Tensor,
 ) -> Tuple[
-    torch.Tensor, torch.Tensor, torch.Tensor,  # rowwise: q, sf, amax (M-vec)
-    torch.Tensor, torch.Tensor, torch.Tensor,  # columnwise: q, sf, amax (K-vec)
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,  # rowwise: q, sf, amax (M-vec)
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,  # columnwise: q, sf, amax (K-vec)
 ]:
     """Per-token dual-direction quantize. For input (M, K) bf16:
 
@@ -486,17 +490,32 @@ def _quantize_per_token_dual(
     s_col = torch.empty((K, M // 16), dtype=torch.uint8, device=x.device)
     a_col = torch.empty((K,), dtype=torch.float32, device=x.device)
     tex.nvfp4_per_token_quantize(
-        x, q_row, s_row, a_row, q_col, s_col, a_col,
-        rowwise=True, columnwise=True, with_rht=False,
-        random_sign_mask_t=int(0xACE1), with_swizzle=False,
+        x,
+        q_row,
+        s_row,
+        a_row,
+        q_col,
+        s_col,
+        a_col,
+        rowwise=True,
+        columnwise=True,
+        with_rht=False,
+        random_sign_mask_t=int(0xACE1),
+        with_swizzle=False,
     )
     return q_row, s_row, a_row, q_col, s_col, a_col
 
 
 def _run_fused_dgrad(
-    dy_q_row: torch.Tensor, dy_sf_row: torch.Tensor, dy_amax_row: torch.Tensor,
-    w_q_col: torch.Tensor, w_sf_col: torch.Tensor, w_amax_col: torch.Tensor,
-    M: int, N: int, K: int,
+    dy_q_row: torch.Tensor,
+    dy_sf_row: torch.Tensor,
+    dy_amax_row: torch.Tensor,
+    w_q_col: torch.Tensor,
+    w_sf_col: torch.Tensor,
+    w_amax_col: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
 ) -> torch.Tensor:
     """dgrad: dX = dY @ W via fused EVT. dY is rowwise quant of (M, N);
     W contributes its columnwise quant (K rows of N FP4 elts = W.T quant
@@ -507,19 +526,32 @@ def _run_fused_dgrad(
     """
     d = torch.empty((M, K), dtype=torch.bfloat16, device=dy_q_row.device)
     tex.nvfp4_cutlass_per_token_gemm(
-        dy_q_row, w_q_col,
-        dy_sf_row.reshape(-1), w_sf_col.reshape(-1),
-        dy_amax_row, w_amax_col,
-        d, M, K, N,
-        a_sf_swizzled=False, b_sf_swizzled=False,
+        dy_q_row,
+        w_q_col,
+        dy_sf_row.reshape(-1),
+        w_sf_col.reshape(-1),
+        dy_amax_row,
+        w_amax_col,
+        d,
+        M,
+        K,
+        N,
+        a_sf_swizzled=False,
+        b_sf_swizzled=False,
     )
     return d
 
 
 def _run_fused_wgrad(
-    dy_q_col: torch.Tensor, dy_sf_col: torch.Tensor, dy_amax_col: torch.Tensor,
-    x_q_col: torch.Tensor, x_sf_col: torch.Tensor, x_amax_col: torch.Tensor,
-    M: int, N: int, K: int,
+    dy_q_col: torch.Tensor,
+    dy_sf_col: torch.Tensor,
+    dy_amax_col: torch.Tensor,
+    x_q_col: torch.Tensor,
+    x_sf_col: torch.Tensor,
+    x_amax_col: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
 ) -> torch.Tensor:
     """wgrad: dW = dY^T @ X via fused EVT. Both operands feed their
     columnwise quant: dY columnwise = (N, M/2) raw FP4 (= dY.T rowwise);
@@ -531,11 +563,18 @@ def _run_fused_wgrad(
     """
     d = torch.empty((N, K), dtype=torch.bfloat16, device=dy_q_col.device)
     tex.nvfp4_cutlass_per_token_gemm(
-        dy_q_col, x_q_col,
-        dy_sf_col.reshape(-1), x_sf_col.reshape(-1),
-        dy_amax_col, x_amax_col,
-        d, N, K, M,
-        a_sf_swizzled=False, b_sf_swizzled=False,
+        dy_q_col,
+        x_q_col,
+        dy_sf_col.reshape(-1),
+        x_sf_col.reshape(-1),
+        dy_amax_col,
+        x_amax_col,
+        d,
+        N,
+        K,
+        M,
+        a_sf_swizzled=False,
+        b_sf_swizzled=False,
     )
     return d
 
@@ -574,7 +613,11 @@ def _make_grad_quantizer() -> NVFP4Quantizer:
 
 
 def _pten_dgrad(
-    dy: torch.Tensor, w: torch.Tensor, M: int, N: int, K: int,
+    dy: torch.Tensor,
+    w: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
 ) -> torch.Tensor:
     """Prod per-tensor dgrad via general_gemm (linear.py:986). A=W
     (columnwise), B=dY (rowwise), layout='NN' -> output dX shape (M, K).
@@ -593,13 +636,21 @@ def _pten_dgrad(
     tex.quantize(dy, grad_q, dst_dy, None)
     del M, N, K
     d, _, _, _ = general_gemm(
-        dst_w, dst_dy, layout="NN", grad=True, out_dtype=torch.bfloat16,
+        dst_w,
+        dst_dy,
+        layout="NN",
+        grad=True,
+        out_dtype=torch.bfloat16,
     )
     return d
 
 
 def _pten_wgrad(
-    dy: torch.Tensor, x: torch.Tensor, M: int, N: int, K: int,
+    dy: torch.Tensor,
+    x: torch.Tensor,
+    M: int,
+    N: int,
+    K: int,
 ) -> torch.Tensor:
     """Prod per-tensor wgrad via general_gemm (linear.py:1159). A=X
     (columnwise), B=dY (columnwise), layout='NT' -> output dW shape
@@ -618,7 +669,11 @@ def _pten_wgrad(
     tex.quantize(dy, grad_q, dst_dy, None)
     del M, N, K
     d, _, _, _ = general_gemm(
-        dst_x, dst_dy, layout="NT", grad=True, out_dtype=torch.bfloat16,
+        dst_x,
+        dst_dy,
+        layout="NT",
+        grad=True,
+        out_dtype=torch.bfloat16,
     )
     return d
 
@@ -724,11 +779,11 @@ def test_e2e_bwd_per_token_vs_bf16_ground_truth(M: int, N: int, K: int) -> None:
 
     assert snr_dgrad["rel_l2"] < 0.30, (
         f"per-token bwd dgrad rel_l2={snr_dgrad['rel_l2']:.4f} exceeds 0.30 "
-        f"-- accuracy regression in dgrad path."
+        "-- accuracy regression in dgrad path."
     )
     assert snr_wgrad["rel_l2"] < 0.30, (
         f"per-token bwd wgrad rel_l2={snr_wgrad['rel_l2']:.4f} exceeds 0.30 "
-        f"-- accuracy regression in wgrad path."
+        "-- accuracy regression in wgrad path."
     )
 
 
@@ -784,18 +839,18 @@ def test_e2e_bwd_per_token_vs_per_tensor_snr(M: int, N: int, K: int) -> None:
         f"({'per-token wins' if ratio_wgrad < 1.0 else 'per-tensor wins or tied'})"
     )
 
-    assert snr_pten_dgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR, (
-        f"per-tensor dgrad rel_l2={snr_pten_dgrad['rel_l2']:.4f} > floor."
-    )
-    assert snr_cf_dgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR, (
-        f"per-token dgrad rel_l2={snr_cf_dgrad['rel_l2']:.4f} > floor."
-    )
-    assert snr_pten_wgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR, (
-        f"per-tensor wgrad rel_l2={snr_pten_wgrad['rel_l2']:.4f} > floor."
-    )
-    assert snr_cf_wgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR, (
-        f"per-token wgrad rel_l2={snr_cf_wgrad['rel_l2']:.4f} > floor."
-    )
+    assert (
+        snr_pten_dgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR
+    ), f"per-tensor dgrad rel_l2={snr_pten_dgrad['rel_l2']:.4f} > floor."
+    assert (
+        snr_cf_dgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR
+    ), f"per-token dgrad rel_l2={snr_cf_dgrad['rel_l2']:.4f} > floor."
+    assert (
+        snr_pten_wgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR
+    ), f"per-tensor wgrad rel_l2={snr_pten_wgrad['rel_l2']:.4f} > floor."
+    assert (
+        snr_cf_wgrad["rel_l2"] < _LAYER3_REL_L2_HARD_FLOOR
+    ), f"per-token wgrad rel_l2={snr_cf_wgrad['rel_l2']:.4f} > floor."
 
 
 if __name__ == "__main__":

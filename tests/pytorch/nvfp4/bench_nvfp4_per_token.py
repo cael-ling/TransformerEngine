@@ -236,7 +236,7 @@ class E2EBackwardShapeBench:
     K: int
     N: int
     t_pten: float  # dY quant (grad_q, RHT+SR) + general_gemm NN dgrad + NT wgrad
-    t_cf: float    # dY quant (per-token dual) + fused-EVT dgrad + wgrad
+    t_cf: float  # dY quant (per-token dual) + fused-EVT dgrad + wgrad
     t_pten_g: float
     t_cf_g: float
 
@@ -594,9 +594,21 @@ def _bench_shape_gemm_only(
 
     def _lt_post():
         tex.nvfp4_per_token_gemm(
-            a_qr, b_qr, a_sr_flat, b_sr_flat,
-            a_ra, b_ra, d_lp, workspace, M, N, K, 1.0, 0.0,
-            a_sf_swizzled=True, b_sf_swizzled=True,
+            a_qr,
+            b_qr,
+            a_sr_flat,
+            b_sr_flat,
+            a_ra,
+            b_ra,
+            d_lp,
+            workspace,
+            M,
+            N,
+            K,
+            1.0,
+            0.0,
+            a_sf_swizzled=True,
+            b_sf_swizzled=True,
             skip_post_scale=False,
         )
 
@@ -629,9 +641,15 @@ def _bench_shape_gemm_only(
     t_clf_g = cuda_graph_time_ms(_cutlass_fused)
 
     return GemmOnlyShapeBench(
-        M=M, K=K, N=N,
-        t_pten=t_pten, t_lp=t_lp, t_clf=t_clf,
-        t_pten_g=t_pten_g, t_lp_g=t_lp_g, t_clf_g=t_clf_g,
+        M=M,
+        K=K,
+        N=N,
+        t_pten=t_pten,
+        t_lp=t_lp,
+        t_clf=t_clf,
+        t_pten_g=t_pten_g,
+        t_lp_g=t_lp_g,
+        t_clf_g=t_clf_g,
     )
 
 
@@ -706,17 +724,46 @@ def _bench_shape_e2e_fwd(
 
     def _cf_e2e():
         tex.nvfp4_per_token_quantize(
-            a, a_qr, a_sr, a_ra, a_qc, a_sc, a_ca, True, True,
-            with_rht=False, random_sign_mask_t=0, with_swizzle=True,
+            a,
+            a_qr,
+            a_sr,
+            a_ra,
+            a_qc,
+            a_sc,
+            a_ca,
+            True,
+            True,
+            with_rht=False,
+            random_sign_mask_t=0,
+            with_swizzle=True,
         )
         tex.nvfp4_per_token_quantize(
-            b, b_qr, b_sr, b_ra, b_qc, b_sc, b_ca, True, True,
-            with_rht=False, random_sign_mask_t=0, with_swizzle=True,
+            b,
+            b_qr,
+            b_sr,
+            b_ra,
+            b_qc,
+            b_sc,
+            b_ca,
+            True,
+            True,
+            with_rht=False,
+            random_sign_mask_t=0,
+            with_swizzle=True,
         )
         tex.nvfp4_cutlass_per_token_gemm(
-            a_qr, b_qr, a_sr_flat, b_sr_flat,
-            a_ra, b_ra, d_cf, M, N, K,
-            a_sf_swizzled=True, b_sf_swizzled=True,
+            a_qr,
+            b_qr,
+            a_sr_flat,
+            b_sr_flat,
+            a_ra,
+            b_ra,
+            d_cf,
+            M,
+            N,
+            K,
+            a_sf_swizzled=True,
+            b_sf_swizzled=True,
         )
 
     # Prod per-tensor baseline (NVFP4BlockScaling defaults, prod fwd) via
@@ -728,18 +775,24 @@ def _bench_shape_e2e_fwd(
 
     input_q = NVFP4Quantizer(
         fp4_dtype=tex.DType.kFloat4E2M1,
-        rowwise=True, columnwise=True,
-        with_amax_reduction=False, amax_reduction_group=None,
-        with_rht=True, with_post_rht_amax=True,
+        rowwise=True,
+        columnwise=True,
+        with_amax_reduction=False,
+        amax_reduction_group=None,
+        with_rht=True,
+        with_post_rht_amax=True,
         with_2d_quantization=False,
         stochastic_rounding=False,
         with_random_sign_mask=True,
     )
     weight_q = NVFP4Quantizer(
         fp4_dtype=tex.DType.kFloat4E2M1,
-        rowwise=True, columnwise=True,
-        with_amax_reduction=False, amax_reduction_group=None,
-        with_rht=False, with_post_rht_amax=False,
+        rowwise=True,
+        columnwise=True,
+        with_amax_reduction=False,
+        amax_reduction_group=None,
+        with_rht=False,
+        with_post_rht_amax=False,
         with_2d_quantization=True,
         stochastic_rounding=False,
         with_random_sign_mask=True,
@@ -760,9 +813,13 @@ def _bench_shape_e2e_fwd(
     t_cf_g = cuda_graph_time_ms(_cf_e2e)
 
     return E2EForwardShapeBench(
-        M=M, K=K, N=N,
-        t_pten=t_pten, t_cf=t_cf,
-        t_pten_g=t_pten_g, t_cf_g=t_cf_g,
+        M=M,
+        K=K,
+        N=N,
+        t_pten=t_pten,
+        t_cf=t_cf,
+        t_pten_g=t_pten_g,
+        t_cf_g=t_cf_g,
     )
 
 
@@ -862,31 +919,79 @@ def _bench_shape_e2e_bwd(
     # Pre-quantize X and W ONCE (mirrors fwd-saved tensors that bwd reads
     # back from ctx). These calls are NOT in the timing loop.
     tex.nvfp4_per_token_quantize(
-        w, w_qr, w_sr, w_ra, w_qc, w_sc, w_ca, True, True,
-        with_rht=False, random_sign_mask_t=0, with_swizzle=False,
+        w,
+        w_qr,
+        w_sr,
+        w_ra,
+        w_qc,
+        w_sc,
+        w_ca,
+        True,
+        True,
+        with_rht=False,
+        random_sign_mask_t=0,
+        with_swizzle=False,
     )
     tex.nvfp4_per_token_quantize(
-        x, x_qr, x_sr, x_ra, x_qc, x_sc, x_ca, True, True,
-        with_rht=False, random_sign_mask_t=0, with_swizzle=False,
+        x,
+        x_qr,
+        x_sr,
+        x_ra,
+        x_qc,
+        x_sc,
+        x_ca,
+        True,
+        True,
+        with_rht=False,
+        random_sign_mask_t=0,
+        with_swizzle=False,
     )
 
     def _cf_e2e():
         # Real bwd: only dY is freshly quantized. W, X reused from fwd.
         tex.nvfp4_per_token_quantize(
-            dy, dy_qr, dy_sr, dy_ra, dy_qc, dy_sc, dy_ca, True, True,
-            with_rht=False, random_sign_mask_t=0, with_swizzle=False,
+            dy,
+            dy_qr,
+            dy_sr,
+            dy_ra,
+            dy_qc,
+            dy_sc,
+            dy_ca,
+            True,
+            True,
+            with_rht=False,
+            random_sign_mask_t=0,
+            with_swizzle=False,
         )
         # dgrad: dX = dY @ W (M, N) @ (N, K) = (M, K).
         tex.nvfp4_cutlass_per_token_gemm(
-            dy_qr, w_qc, dy_sr_flat, w_sc_flat,
-            dy_ra, w_ca, d_dgrad, M, K, N,
-            a_sf_swizzled=False, b_sf_swizzled=False,
+            dy_qr,
+            w_qc,
+            dy_sr_flat,
+            w_sc_flat,
+            dy_ra,
+            w_ca,
+            d_dgrad,
+            M,
+            K,
+            N,
+            a_sf_swizzled=False,
+            b_sf_swizzled=False,
         )
         # wgrad: dW = dY^T @ X (N, M) @ (M, K) = (N, K).
         tex.nvfp4_cutlass_per_token_gemm(
-            dy_qc, x_qc, dy_sc_flat, x_sc_flat,
-            dy_ca, x_ca, d_wgrad, N, K, M,
-            a_sf_swizzled=False, b_sf_swizzled=False,
+            dy_qc,
+            x_qc,
+            dy_sc_flat,
+            x_sc_flat,
+            dy_ca,
+            x_ca,
+            d_wgrad,
+            N,
+            K,
+            M,
+            a_sf_swizzled=False,
+            b_sf_swizzled=False,
         )
 
     # --- prod per-tensor side: real-ship NVFP4BlockScaling defaults.
@@ -898,27 +1003,36 @@ def _bench_shape_e2e_bwd(
 
     input_q = NVFP4Quantizer(
         fp4_dtype=tex.DType.kFloat4E2M1,
-        rowwise=True, columnwise=True,
-        with_amax_reduction=False, amax_reduction_group=None,
-        with_rht=True, with_post_rht_amax=True,
+        rowwise=True,
+        columnwise=True,
+        with_amax_reduction=False,
+        amax_reduction_group=None,
+        with_rht=True,
+        with_post_rht_amax=True,
         with_2d_quantization=False,
         stochastic_rounding=False,
         with_random_sign_mask=True,
     )
     weight_q = NVFP4Quantizer(
         fp4_dtype=tex.DType.kFloat4E2M1,
-        rowwise=True, columnwise=True,
-        with_amax_reduction=False, amax_reduction_group=None,
-        with_rht=False, with_post_rht_amax=False,
+        rowwise=True,
+        columnwise=True,
+        with_amax_reduction=False,
+        amax_reduction_group=None,
+        with_rht=False,
+        with_post_rht_amax=False,
         with_2d_quantization=True,
         stochastic_rounding=False,
         with_random_sign_mask=True,
     )
     grad_q = NVFP4Quantizer(
         fp4_dtype=tex.DType.kFloat4E2M1,
-        rowwise=True, columnwise=True,
-        with_amax_reduction=False, amax_reduction_group=None,
-        with_rht=True, with_post_rht_amax=True,
+        rowwise=True,
+        columnwise=True,
+        with_amax_reduction=False,
+        amax_reduction_group=None,
+        with_rht=True,
+        with_post_rht_amax=True,
         with_2d_quantization=False,
         stochastic_rounding=True,
         with_random_sign_mask=True,
@@ -939,13 +1053,21 @@ def _bench_shape_e2e_bwd(
         tex.quantize(dy, grad_q, dst_dy, None)
         # dgrad: general_gemm(W, dY, layout='NN') -> (M, K)
         general_gemm(
-            dst_w, dst_dy, layout="NN", grad=True,
-            out=d_pten_dgrad, out_dtype=torch.bfloat16,
+            dst_w,
+            dst_dy,
+            layout="NN",
+            grad=True,
+            out=d_pten_dgrad,
+            out_dtype=torch.bfloat16,
         )
         # wgrad: general_gemm(X, dY, layout='NT') -> (N, K)
         general_gemm(
-            dst_x, dst_dy, layout="NT", grad=True,
-            out=d_pten_wgrad, out_dtype=torch.bfloat16,
+            dst_x,
+            dst_dy,
+            layout="NT",
+            grad=True,
+            out=d_pten_wgrad,
+            out_dtype=torch.bfloat16,
         )
 
     t_pten = cuda_time_ms(_pten_e2e)
@@ -954,9 +1076,13 @@ def _bench_shape_e2e_bwd(
     t_cf_g = cuda_graph_time_ms(_cf_e2e)
 
     return E2EBackwardShapeBench(
-        M=M, K=K, N=N,
-        t_pten=t_pten, t_cf=t_cf,
-        t_pten_g=t_pten_g, t_cf_g=t_cf_g,
+        M=M,
+        K=K,
+        N=N,
+        t_pten=t_pten,
+        t_cf=t_cf,
+        t_pten_g=t_pten_g,
+        t_cf_g=t_cf_g,
     )
 
 
@@ -1341,13 +1467,8 @@ def _print_gemm_only_table(records: List[GemmOnlyShapeBench]) -> None:
     """
     w_pten, w_lp, w_clf, w_ratio = 11, 11, 11, 8
     block_w = w_pten + 1 + w_lp + 1 + w_clf + 1 + w_ratio
-    header1 = (
-        f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
-    )
-    body = (
-        f"{'pten_gemm':>{w_pten}} {'lt_post':>{w_lp}} {'ct_fused':>{w_clf}}"
-        f" {'lp/cf':>{w_ratio}}"
-    )
+    header1 = f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
+    body = f"{'pten_gemm':>{w_pten}} {'lt_post':>{w_lp}} {'ct_fused':>{w_clf}} {'lp/cf':>{w_ratio}}"
     header2 = f"{'M':>7} {'K':>6} {'N':>6} |{body}|{body}"
     print(header1)
     print(header2)
@@ -1361,7 +1482,7 @@ def _print_gemm_only_table(records: List[GemmOnlyShapeBench]) -> None:
         if prev_M is not None and rec.M != prev_M:
             print()
         prev_M = rec.M
-        r_lpcf   = _ratio(rec.t_lp,   rec.t_clf)
+        r_lpcf = _ratio(rec.t_lp, rec.t_clf)
         r_lpcf_g = _ratio(rec.t_lp_g, rec.t_clf_g)
         print(
             f"{rec.M:>7} {rec.K:>6} {rec.N:>6}"
@@ -1407,17 +1528,13 @@ def _print_gemm_only_legend() -> None:
 
 def _print_e2e_fwd_table(records: List[E2EForwardShapeBench]) -> None:
     """E2E forward (--e2e-fwd): quant + GEMM inside the timing loop.
-      pten_e2e = NVFP4Quantizer (RHT+SR) + nvfp4_per_tensor_gemm (prod baseline).
-      ct_fused = nvfp4_per_token_quantize(with_swizzle=True) + fused-EVT GEMM.
+    pten_e2e = NVFP4Quantizer (RHT+SR) + nvfp4_per_tensor_gemm (prod baseline).
+    ct_fused = nvfp4_per_token_quantize(with_swizzle=True) + fused-EVT GEMM.
     """
     w_pten, w_cf, w_ratio = 11, 11, 8
     block_w = w_pten + 1 + w_cf + 1 + w_ratio
-    header1 = (
-        f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
-    )
-    body = (
-        f"{'pten_e2e':>{w_pten}} {'ct_fused':>{w_cf}} {'cf/pten':>{w_ratio}}"
-    )
+    header1 = f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
+    body = f"{'pten_e2e':>{w_pten}} {'ct_fused':>{w_cf}} {'cf/pten':>{w_ratio}}"
     header2 = f"{'M':>7} {'K':>6} {'N':>6} |{body}|{body}"
     print(header1)
     print(header2)
@@ -1466,12 +1583,8 @@ def _print_e2e_bwd_table(records: List[E2EBackwardShapeBench]) -> None:
     """
     w_pten, w_cf, w_ratio = 11, 11, 8
     block_w = w_pten + 1 + w_cf + 1 + w_ratio
-    header1 = (
-        f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
-    )
-    body = (
-        f"{'pten_bwd':>{w_pten}} {'ct_fused':>{w_cf}} {'cf/pten':>{w_ratio}}"
-    )
+    header1 = f"{'':>7} {'':>6} {'':>6} |{'Eager':^{block_w}} |{'Graph':^{block_w}}"
+    body = f"{'pten_bwd':>{w_pten}} {'ct_fused':>{w_cf}} {'cf/pten':>{w_ratio}}"
     header2 = f"{'M':>7} {'K':>6} {'N':>6} |{body}|{body}"
     print(header1)
     print(header2)
@@ -1973,8 +2086,14 @@ def main() -> int:
         args.qs = True
 
     exclusive = sum(
-        int(x) for x in (
-            args.k1_only, args.swizzle, args.qs, args.gemm_only, args.e2e_fwd, args.e2e_bwd,
+        int(x)
+        for x in (
+            args.k1_only,
+            args.swizzle,
+            args.qs,
+            args.gemm_only,
+            args.e2e_fwd,
+            args.e2e_bwd,
         )
     )
     if exclusive > 1:
