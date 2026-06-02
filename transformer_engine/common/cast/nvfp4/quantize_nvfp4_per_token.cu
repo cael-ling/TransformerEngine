@@ -377,8 +377,8 @@ __device__ __forceinline__ void colwise_scaling_per_token(
           // 4 contiguous bf16 per quad -> uint64; dither via the bf16 SR cast.
           const float2 bs2 = make_float2(block_scale, block_scale);
           const uint64_t elts = *reinterpret_cast<const uint64_t*>(&rIn[w][4 * e]);
-          qu[e] = ptx::mul_cvt_bf16_to_fp4_4x<true>(elts, bs2,
-                                                    get_rbits(rng, random_uint4, rnd_idx));
+          qu[e] =
+              ptx::mul_cvt_bf16_to_fp4_4x<true>(elts, bs2, get_rbits(rng, random_uint4, rnd_idx));
         } else {
           IType2 in01{rIn[w][4 * e + 0], rIn[w][4 * e + 1]};
           IType2 in23{rIn[w][4 * e + 2], rIn[w][4 * e + 3]};
@@ -1156,8 +1156,8 @@ void per_token_amax_blocked_impl(const Tensor&, const Tensor&, Tensor*, bool, ui
                                  cudaStream_t) {
   NVTE_ERROR("NVFP4 requires SM100 (Blackwell); build with sm_100a/sm_100f.");
 }
-void per_token_encode_blocked_impl(const Tensor&, const Tensor&, Tensor*, bool, uint32_t, bool, bool,
-                                   const size_t*, cudaStream_t) {
+void per_token_encode_blocked_impl(const Tensor&, const Tensor&, Tensor*, bool, uint32_t, bool,
+                                   bool, const size_t*, cudaStream_t) {
   NVTE_ERROR("NVFP4 requires SM100 (Blackwell); build with sm_100a/sm_100f.");
 }
 void per_token_quantize_blocked_impl(const Tensor&, const Tensor&, Tensor*, bool, uint32_t, bool,

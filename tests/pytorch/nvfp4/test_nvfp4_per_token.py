@@ -1044,9 +1044,9 @@ def test_per_token_sr_unbiased(M: int, K: int) -> None:
     rmse_sr = torch.sqrt(((dq_sr - x.float()) ** 2).mean())
 
     print(f"[per-token SR] M={M} K={K}  RMSE SR(mean of {n_iters})={rmse_sr:.3e}  RN={rmse_rn:.3e}")
-    assert rmse_sr < rmse_rn, (
-        f"per-token SR not unbiased: mean-SR RMSE {rmse_sr:.3e} >= RN RMSE {rmse_rn:.3e}"
-    )
+    assert (
+        rmse_sr < rmse_rn
+    ), f"per-token SR not unbiased: mean-SR RMSE {rmse_sr:.3e} >= RN RMSE {rmse_rn:.3e}"
 
 
 @_GATED_SM100
