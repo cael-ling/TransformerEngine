@@ -199,17 +199,11 @@ def _nvfp4_per_token_gemm(
             "(or fall back to prod NVFP4)."
         )
     if gelu:
-        raise NotImplementedError(
-            "NVFP4 per-token GEMM does not yet support fused gelu."
-        )
+        raise NotImplementedError("NVFP4 per-token GEMM does not yet support fused gelu.")
     if ub is not None:
-        raise NotImplementedError(
-            "NVFP4 per-token GEMM does not yet support comm-overlap."
-        )
+        raise NotImplementedError("NVFP4 per-token GEMM does not yet support comm-overlap.")
     if extra_output is not None:
-        raise NotImplementedError(
-            "NVFP4 per-token GEMM does not yet support extra_output."
-        )
+        raise NotImplementedError("NVFP4 per-token GEMM does not yet support extra_output.")
     if quantization_params is not None:
         # The fused EVT only emits bf16; output quantization would have
         # to wrap the result in a separate post-cast (TODO).
@@ -329,9 +323,7 @@ def _nvfp4_per_token_gemm(
     # Allocate output if needed.
     out_dtype = out_dtype or torch.bfloat16
     if out_dtype != torch.bfloat16:
-        raise NotImplementedError(
-            f"NVFP4 per-token GEMM only emits bf16 (requested {out_dtype})."
-        )
+        raise NotImplementedError(f"NVFP4 per-token GEMM only emits bf16 (requested {out_dtype}).")
     if out is None:
         out = torch.empty((M, N), dtype=torch.bfloat16, device=ka_data.device)
     elif out.numel() != M * N:

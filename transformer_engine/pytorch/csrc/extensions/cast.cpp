@@ -878,13 +878,12 @@ std::tuple<std::vector<py::object>, std::vector<TensorWrapper>, bool> bulk_alloc
     py::object amax_columnwise = columnwise_usage ? py::cast(amax_columnwise_list[i]) : py::none();
 
     // Construct Python tensor
-    tensor_py_list.emplace_back(
-        NVFP4TensorClass(rowwise_data, rowwise_scale, columnwise_data, columnwise_scale,
-                         amax_rowwise, amax_columnwise, fp4_dtype, quantizer_py_list[i],
-                         with_gemm_swizzled_scales, py::arg("row_scaled_nvfp4") = row_scaled_nvfp4,
-                         py::arg("nvfp4_use_4over6") = nvfp4_use_4over6,
-                         py::arg("nvfp4_e4m3_max") = nvfp4_e4m3_max,
-                         py::arg("per_token") = per_token));
+    tensor_py_list.emplace_back(NVFP4TensorClass(
+        rowwise_data, rowwise_scale, columnwise_data, columnwise_scale, amax_rowwise,
+        amax_columnwise, fp4_dtype, quantizer_py_list[i], with_gemm_swizzled_scales,
+        py::arg("row_scaled_nvfp4") = row_scaled_nvfp4,
+        py::arg("nvfp4_use_4over6") = nvfp4_use_4over6, py::arg("nvfp4_e4m3_max") = nvfp4_e4m3_max,
+        py::arg("per_token") = per_token));
 
     // Construct C++ tensor
     // Use a TensorWrapper variable to hold the output of makeTransformerEngineTensor,
@@ -1353,8 +1352,7 @@ void split_quantize_nvfp4_impl(const TensorWrapper &input,
   // fusion). Calls the existing K1+K2 grouped kernel. Constraints (M_i % 64,
   // K % 128, bf16-only) are enforced inside the C-API.
   if (per_token) {
-    NVTE_CHECK(input.dtype() == DType::kBFloat16,
-               "NVFP4 per-token split-quantize is bf16-only.");
+    NVTE_CHECK(input.dtype() == DType::kBFloat16, "NVFP4 per-token split-quantize is bf16-only.");
 
     const size_t num_tensors = output_list.size();
     std::vector<NVTETensor> handles;
@@ -1363,11 +1361,10 @@ void split_quantize_nvfp4_impl(const TensorWrapper &input,
       handles.push_back(out.data());
     }
     NVTE_SCOPED_GIL_RELEASE({
-      nvte_group_nvfp4_per_token_quantize(
-          input.data(), handles.data(), split_sections.data(), num_tensors,
-          quantizer.rowwise_usage, quantizer.columnwise_usage,
-          quantizer.with_rht ? 1 : 0, quantizer.rht_matrix_random_sign_mask_t,
-          stream);
+      nvte_group_nvfp4_per_token_quantize(input.data(), handles.data(), split_sections.data(),
+                                          num_tensors, quantizer.rowwise_usage,
+                                          quantizer.columnwise_usage, quantizer.with_rht ? 1 : 0,
+                                          quantizer.rht_matrix_random_sign_mask_t, stream);
     });
     return;
   }

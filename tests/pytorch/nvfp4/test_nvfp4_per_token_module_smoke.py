@@ -58,15 +58,15 @@ def test_recipe_construction_forces_mutex_flags():
     """Recipe __post_init__ must zero out flags incompatible with per-token."""
     r = _make_per_token_recipe()
     assert r.disable_rht is True, "per-token recipe must force disable_rht=True"
-    assert r.disable_stochastic_rounding is True, (
-        "per-token recipe must force SR off (no SR kernel yet)"
-    )
-    assert r.disable_2d_quantization is True, (
-        "per-token recipe must force 2D quant off (mutex with per-token amax)"
-    )
-    assert r.row_scaled_activation is False, (
-        "per-token already encodes per-row amax; row_scaled_activation must be off"
-    )
+    assert (
+        r.disable_stochastic_rounding is True
+    ), "per-token recipe must force SR off (no SR kernel yet)"
+    assert (
+        r.disable_2d_quantization is True
+    ), "per-token recipe must force 2D quant off (mutex with per-token amax)"
+    assert (
+        r.row_scaled_activation is False
+    ), "per-token already encodes per-row amax; row_scaled_activation must be off"
     assert r.nvfp4_4over6 == "none", "per-token recipe must force 4over6 off"
 
     # Recipe.nvfp4() must still return True (backward compat for all the
@@ -133,13 +133,13 @@ def test_env_var_unset_keeps_base_recipe_prod(monkeypatch):
     # (Switching to a 2-CTA cluster — path B — would tighten M to %256.)
     "M,N,K",
     [
-        (128, 128, 128),   # absolute smallest (was %256-rejected on M, N, K)
-        (128, 256, 128),   # K=128 stress (was %256-rejected)
-        (256, 128, 128),   # K=128 stress, axis-swap guard
-        (256, 256, 128),   # K-only at minimum, K-residue predication test
+        (128, 128, 128),  # absolute smallest (was %256-rejected on M, N, K)
+        (128, 256, 128),  # K=128 stress (was %256-rejected)
+        (256, 128, 128),  # K=128 stress, axis-swap guard
+        (256, 256, 128),  # K-only at minimum, K-residue predication test
         (512, 1024, 256),  # asymmetric mid-size, K = 1 full mainloop tile
-        (1024, 1024, 768), # K not power-of-2 multiple of 128 (matches cublas test)
-        (4096, 4096, 4096),# production-class
+        (1024, 1024, 768),  # K not power-of-2 multiple of 128 (matches cublas test)
+        (4096, 4096, 4096),  # production-class
     ],
 )
 def test_linear_fwd_smoke(M, N, K):
@@ -234,11 +234,11 @@ def test_linear_fwd_vs_bf16_loose_numerics():
     # alignment contract; nothing about bwd loosens it).
     "M,N,K",
     [
-        (128, 128, 128),     # absolute smallest
-        (256, 256, 128),     # K-only at minimum -- exercises K-residue
-        (256, 128, 128),     # axis-swap guard
-        (512, 1024, 256),    # asymmetric, full K-tile
-        (1024, 1024, 768),   # K not power-of-2
+        (128, 128, 128),  # absolute smallest
+        (256, 256, 128),  # K-only at minimum -- exercises K-residue
+        (256, 128, 128),  # axis-swap guard
+        (512, 1024, 256),  # asymmetric, full K-tile
+        (1024, 1024, 768),  # K not power-of-2
     ],
 )
 def test_linear_bwd_smoke(M, N, K):
@@ -280,9 +280,7 @@ def test_linear_bwd_smoke(M, N, K):
     weight_grad = linear.weight.grad
     assert weight_grad is not None, "linear.weight.grad is None -- wgrad never ran"
     # te.Linear stores W as (N, K) so dW is also (N, K).
-    assert weight_grad.shape == (N, K), (
-        f"dW shape {weight_grad.shape}, want {(N, K)}"
-    )
+    assert weight_grad.shape == (N, K), f"dW shape {weight_grad.shape}, want {(N, K)}"
 
     # Bias gradient (db) flows through a separate sum-reduction path
     # (NOT through the per-token GEMM EVT). Just sanity-check it's
@@ -397,9 +395,9 @@ def test_linear_bwd_vs_bf16_loose_numerics():
 @pytest.mark.parametrize(
     "B,S,K,N",
     [
-        (1, 128, 128, 128),   # smallest; flattened M=128
-        (3, 256, 128, 256),   # batch=3 (NOT %128); flattened M=768
-        (2, 256, 512, 256),   # flattened M=512, larger K
+        (1, 128, 128, 128),  # smallest; flattened M=128
+        (3, 256, 128, 256),  # batch=3 (NOT %128); flattened M=768
+        (2, 256, 512, 256),  # flattened M=512, larger K
         (32, 128, 256, 512),  # the LLM-script shape that first hit the bug
     ],
 )
@@ -439,18 +437,14 @@ def test_linear_3d_input_fwd_bwd_smoke(B, S, K, N):
 
     # (2) dX must mirror the 3D input shape.
     assert x.grad is not None, "x.grad is None -- dgrad never ran"
-    assert x.grad.shape == (B, S, K), (
-        f"dX shape {tuple(x.grad.shape)}, want {(B, S, K)}"
-    )
+    assert x.grad.shape == (B, S, K), f"dX shape {tuple(x.grad.shape)}, want {(B, S, K)}"
     assert torch.isfinite(x.grad).all(), "dX contains NaN/inf"
     assert x.grad.abs().max().item() > 0.0, "dX is identically zero"
 
     # (3) dW stays 2D (weights are 2D regardless of activation rank).
     weight_grad = linear.weight.grad
     assert weight_grad is not None, "linear.weight.grad is None -- wgrad never ran"
-    assert weight_grad.shape == (N, K), (
-        f"dW shape {tuple(weight_grad.shape)}, want {(N, K)}"
-    )
+    assert weight_grad.shape == (N, K), f"dW shape {tuple(weight_grad.shape)}, want {(N, K)}"
     assert torch.isfinite(weight_grad).all(), "dW contains NaN/inf"
     assert weight_grad.abs().max().item() > 0.0, "dW is identically zero"
 

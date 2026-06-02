@@ -1713,14 +1713,8 @@ class NVFP4BlockScalingRecipeState(RecipeState):
             # per-token cast kernel supports it), so with_rht below is gated on
             # that flag rather than hard-forced off.
             per_token = self.recipe.nvfp4_per_token() and (
-                (
-                    self.mode == "forward"
-                    and tensor_type in ("input", "output", "weight")
-                )
-                or (
-                    self.mode == "backward"
-                    and tensor_type in ("grad_output", "grad_input")
-                )
+                (self.mode == "forward" and tensor_type in ("input", "output", "weight"))
+                or (self.mode == "backward" and tensor_type in ("grad_output", "grad_input"))
             )
 
             return NVFP4Quantizer(

@@ -1824,11 +1824,9 @@ std::pair<TensorWrapper, py::object> NVFP4Quantizer::create_tensor(
   if (per_token) {
     // Per-token kernel constraints (mirror tex.nvfp4_per_token_quantize).
     NVTE_CHECK(flat_first_dim % 128 == 0,
-               "NVFP4 per-token requires flat_first_dim (M) % 128 == 0; got M=",
-               flat_first_dim);
+               "NVFP4 per-token requires flat_first_dim (M) % 128 == 0; got M=", flat_first_dim);
     NVTE_CHECK(flat_last_dim % 128 == 0,
-               "NVFP4 per-token requires last_dim (K) % 128 == 0; got K=",
-               flat_last_dim);
+               "NVFP4 per-token requires last_dim (K) % 128 == 0; got K=", flat_last_dim);
   }
   const auto rowwise_scale_inv_shape = get_scale_shape(shape, false);
   const auto columnwise_scale_inv_shape = get_scale_shape(shape, true);
@@ -1849,9 +1847,8 @@ std::pair<TensorWrapper, py::object> NVFP4Quantizer::create_tensor(
     // (M,) row_amax expected by nvfp4_per_token_quantize K1).
     // Row-scaled: same vector layout, kept for back-compat.
     // Otherwise: scalar (length 1) consumed by cuBLASLt amax slot.
-    const int64_t amax_rows = (per_token || row_scaled_nvfp4)
-                                  ? static_cast<int64_t>(flat_first_dim)
-                                  : 1;
+    const int64_t amax_rows =
+        (per_token || row_scaled_nvfp4) ? static_cast<int64_t>(flat_first_dim) : 1;
     amax_rowwise = at::empty({amax_rows}, bit32_tensor_opts);
   }
   if (columnwise_usage) {
@@ -1868,8 +1865,7 @@ std::pair<TensorWrapper, py::object> NVFP4Quantizer::create_tensor(
     // Per-token: amax_columnwise is a per-col vector of length K (matches
     // the (K,) col_amax expected by nvfp4_per_token_quantize K1).
     // Otherwise: scalar (length 1) consumed by cuBLASLt amax slot.
-    const int64_t amax_cols =
-        per_token ? static_cast<int64_t>(flat_last_dim) : 1;
+    const int64_t amax_cols = per_token ? static_cast<int64_t>(flat_last_dim) : 1;
     amax_columnwise = at::empty({amax_cols}, bit32_tensor_opts);
   }
 
@@ -2181,9 +2177,8 @@ std::pair<TensorWrapper, py::object> NVFP4Quantizer::convert_and_update_tensor(
       rowwise_scale_inv = at::empty(scale_inv_shape_int64, opts);
       tensor.attr("_rowwise_scale_inv") = *rowwise_scale_inv;
     }
-    const int64_t amax_rows = (per_token || row_scaled_nvfp4)
-                                  ? static_cast<int64_t>(flat_first_dim)
-                                  : 1;
+    const int64_t amax_rows =
+        (per_token || row_scaled_nvfp4) ? static_cast<int64_t>(flat_first_dim) : 1;
     if (!amax_rowwise || amax_rowwise->numel() != amax_rows) {
       const auto opts = at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
       // hadamard amax kernel will zero out pointer with ZeroAmaxKernel
@@ -2226,8 +2221,7 @@ std::pair<TensorWrapper, py::object> NVFP4Quantizer::convert_and_update_tensor(
       columnwise_scale_inv = at::empty(scale_inv_shape_int64, opts);
       tensor.attr("_columnwise_scale_inv") = *columnwise_scale_inv;
     }
-    const int64_t amax_cols =
-        per_token ? static_cast<int64_t>(flat_last_dim) : 1;
+    const int64_t amax_cols = per_token ? static_cast<int64_t>(flat_last_dim) : 1;
     if (!amax_columnwise || amax_columnwise->numel() != amax_cols) {
       const auto opts = at::TensorOptions().dtype(torch::kFloat32).device(torch::kCUDA);
       // hadamard amax kernel will zero out pointer with ZeroAmaxKernel
@@ -2369,14 +2363,12 @@ void NVFP4Quantizer::quantize_impl(const TensorWrapper& input, TensorWrapper& ou
     NVTE_CHECK(compute_amax,
                "NVFP4 per-token does not yet support quantize_with_amax "
                "(amax must be computed inside K1).");
-    NVTE_CHECK(!noop_flag.has_value(),
-               "NVFP4 per-token does not yet support noop_flag.");
+    NVTE_CHECK(!noop_flag.has_value(), "NVFP4 per-token does not yet support noop_flag.");
     NVTE_CHECK(this->with_post_rht_amax || !this->with_rht,
                "NVFP4 per-token RHT requires with_post_rht_amax=True "
                "(K1 col_amax must be post-RHT).");
     NVTE_SCOPED_GIL_RELEASE({
-      nvte_nvfp4_per_token_quantize(input.data(), nullptr, out.data(),
-                                    this->with_rht ? 1 : 0,
+      nvte_nvfp4_per_token_quantize(input.data(), nullptr, out.data(), this->with_rht ? 1 : 0,
                                     this->rht_matrix_random_sign_mask_t,
                                     /*with_swizzle=*/0, stream);
     });

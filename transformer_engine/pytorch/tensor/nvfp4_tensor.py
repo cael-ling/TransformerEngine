@@ -188,9 +188,7 @@ class NVFP4Quantizer(Quantizer):
         # Most of these are "not-yet-implemented" rather than fundamental.
         if self.per_token:
             if self.with_2d_quantization:
-                raise ValueError(
-                    "NVFP4 per-token is mutually exclusive with with_2d_quantization."
-                )
+                raise ValueError("NVFP4 per-token is mutually exclusive with with_2d_quantization.")
             if self.row_scaled_nvfp4:
                 raise ValueError(
                     "NVFP4 per-token already encodes per-row outer amax; "
@@ -200,8 +198,7 @@ class NVFP4Quantizer(Quantizer):
                 raise ValueError("NVFP4 per-token does not support 4over6.")
             if self.stochastic_rounding:
                 raise ValueError(
-                    "NVFP4 per-token does not yet support stochastic rounding "
-                    "(TODO: SR kernel)."
+                    "NVFP4 per-token does not yet support stochastic rounding (TODO: SR kernel)."
                 )
             if self.with_amax_reduction:
                 raise ValueError(
@@ -547,9 +544,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
                 "FSDP2 is not supported for NVFP4Tensors with GEMM-swizzled scales."
             )
         if self._per_token:
-            raise NotImplementedError(
-                "FSDP2 is not yet supported for NVFP4 per-token tensors."
-            )
+            raise NotImplementedError("FSDP2 is not yet supported for NVFP4 per-token tensors.")
 
         shard_M = math.prod(self.shape[:-1])
 

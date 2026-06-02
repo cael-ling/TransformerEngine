@@ -177,16 +177,16 @@ def _run_fused(
 _SHAPES = [
     # %128 stress shapes (newly legal after relaxing the entry-point check —
     # these directly verify K-residue predication and 1-CTA M/N alignment).
-    (128, 128, 128),    # absolute smallest legal shape
-    (256, 256, 128),    # K-only at minimum; only one (partial) K-tile total
-    (128, 256, 256),    # M-only at minimum
-    (256, 128, 256),    # N-only at minimum
+    (128, 128, 128),  # absolute smallest legal shape
+    (256, 256, 128),  # K-only at minimum; only one (partial) K-tile total
+    (128, 256, 256),  # M-only at minimum
+    (256, 128, 256),  # N-only at minimum
     # Original %256-aligned shapes (regression-guard the pre-relax path).
     (256, 256, 256),
     (512, 256, 256),
     (256, 512, 256),
     (256, 256, 512),
-    (512, 1024, 768),   # not power-of-2 K
+    (512, 1024, 768),  # not power-of-2 K
     (1024, 1024, 1024),
 ]
 
