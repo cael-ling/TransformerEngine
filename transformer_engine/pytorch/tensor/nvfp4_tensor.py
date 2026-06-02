@@ -141,6 +141,9 @@ class NVFP4Quantizer(Quantizer):
     rht_matrix_random_sign_mask_t: int
     rht_matrix: torch.Tensor
 
+    """Per-token NVFP4 cast (replaces prod 1A / 2A)."""
+    per_token: bool
+
     def __init__(
         self,
         fp4_dtype: TE_DType = tex.DType.kFloat4E2M1,
@@ -157,6 +160,7 @@ class NVFP4Quantizer(Quantizer):
         nvfp4_e4m3_max: int = 448,
         nvfp4_4over6_err_mode: str = "MAE",
         with_random_sign_mask: bool = True,
+        per_token: bool = False,
     ) -> None:
         super().__init__(rowwise=rowwise, columnwise=columnwise)
         self.dtype = fp4_dtype
@@ -178,6 +182,32 @@ class NVFP4Quantizer(Quantizer):
             with_random_sign_mask, torch.cuda.current_device()
         )
         self.rht_matrix = get_rht_matrix(with_random_sign_mask, torch.cuda.current_device())
+        self.per_token = per_token
+
+        # Per-token mode imposes a small set of feature mutex constraints.
+        # Most of these are "not-yet-implemented" rather than fundamental.
+        if self.per_token:
+            if self.with_2d_quantization:
+                raise ValueError(
+                    "NVFP4 per-token is mutually exclusive with with_2d_quantization."
+                )
+            if self.row_scaled_nvfp4:
+                raise ValueError(
+                    "NVFP4 per-token already encodes per-row outer amax; "
+                    "row_scaled_nvfp4 must be False."
+                )
+            if self.nvfp4_use_4over6:
+                raise ValueError("NVFP4 per-token does not support 4over6.")
+            if self.stochastic_rounding:
+                raise ValueError(
+                    "NVFP4 per-token does not yet support stochastic rounding "
+                    "(TODO: SR kernel)."
+                )
+            if self.with_amax_reduction:
+                raise ValueError(
+                    "NVFP4 per-token does not yet support amax reduction "
+                    "(TODO: per-row/per-col vector allreduce)."
+                )
 
     def __getstate__(self):
         """Exclude unpicklable process group from serialized state."""
@@ -223,6 +253,7 @@ class NVFP4Quantizer(Quantizer):
             nvfp4_use_4over6=self.nvfp4_use_4over6,
             nvfp4_e4m3_max=self.nvfp4_e4m3_max,
             nvfp4_4over6_err_mode=self.nvfp4_4over6_err_mode,
+            per_token=self.per_token,
         )
         quantizer.internal = self.internal
         quantizer.optimize_for_gemm = self.optimize_for_gemm
@@ -377,6 +408,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
         row_scaled_nvfp4: bool = False,
         nvfp4_use_4over6: bool = False,
         nvfp4_e4m3_max: int = 448,
+        per_token: bool = False,
         **kwargs,
     ):
         instance = super().__new__(
@@ -394,6 +426,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
             row_scaled_nvfp4=row_scaled_nvfp4,
             nvfp4_use_4over6=nvfp4_use_4over6,
             nvfp4_e4m3_max=nvfp4_e4m3_max,
+            per_token=per_token,
             **kwargs,
         )
         return instance
@@ -513,6 +546,10 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
             raise NotImplementedError(
                 "FSDP2 is not supported for NVFP4Tensors with GEMM-swizzled scales."
             )
+        if self._per_token:
+            raise NotImplementedError(
+                "FSDP2 is not yet supported for NVFP4 per-token tensors."
+            )
 
         shard_M = math.prod(self.shape[:-1])
 
@@ -546,6 +583,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
         sharded_tensors = (rowwise_data, rowwise_scale_inv)
 
         # Pass amax via metadata (scalar, same on all ranks — not all-gathered)
+        # FSDP2 path is not supported in per-token mode (fail-fast above).
         metadata = (
             self._fp4_dtype,
             columnwise_usage,
@@ -554,6 +592,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
             self._row_scaled_nvfp4,
             self._nvfp4_use_4over6,
             self._nvfp4_e4m3_max,
+            self._per_token,
             self.shape[-1],
         )
         return sharded_tensors, metadata
@@ -580,6 +619,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
             row_scaled_nvfp4,
             nvfp4_use_4over6,
             nvfp4_e4m3_max,
+            per_token,
             K,
         ) = metadata
 
@@ -607,6 +647,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
             out._row_scaled_nvfp4 = row_scaled_nvfp4
             out._nvfp4_use_4over6 = nvfp4_use_4over6
             out._nvfp4_e4m3_max = nvfp4_e4m3_max
+            out._per_token = per_token
         else:
             # Construct new tensor (first iteration)
             out = NVFP4Tensor(
@@ -626,6 +667,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
                 row_scaled_nvfp4=row_scaled_nvfp4,
                 nvfp4_use_4over6=nvfp4_use_4over6,
                 nvfp4_e4m3_max=nvfp4_e4m3_max,
+                per_token=per_token,
             )
 
         # Derive columnwise data locally via transpose instead of all-gathering it
@@ -768,6 +810,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
                 row_scaled_nvfp4=tensor._row_scaled_nvfp4,
                 nvfp4_use_4over6=tensor._nvfp4_use_4over6,
                 nvfp4_e4m3_max=tensor._nvfp4_e4m3_max,
+                per_token=tensor._per_token,
             )
 
         # Default case
@@ -792,6 +835,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
                 self._row_scaled_nvfp4,
                 self._nvfp4_use_4over6,
                 self._nvfp4_e4m3_max,
+                self._per_token,
             ),
         )
 
@@ -887,6 +931,7 @@ class NVFP4Tensor(NVFP4TensorStorage, QuantizedTensor):
             self._row_scaled_nvfp4 = tensor._row_scaled_nvfp4
             self._nvfp4_use_4over6 = tensor._nvfp4_use_4over6
             self._nvfp4_e4m3_max = tensor._nvfp4_e4m3_max
+            self._per_token = tensor._per_token
             return
 
         # Quantize to FP8
@@ -943,6 +988,7 @@ def _make_nvfp4_tensor_in_reduce_ex(
     row_scaled_nvfp4: bool = False,
     nvfp4_use_4over6: bool = False,
     nvfp4_e4m3_max: int = 448,
+    per_token: bool = False,
 ) -> NVFP4Tensor:
     """Reconstruct an ``NVFP4Tensor`` from its ``__reduce_ex__`` payload."""
     # Infer device from whichever inner buffer is populated so the wrapper
@@ -970,6 +1016,7 @@ def _make_nvfp4_tensor_in_reduce_ex(
         row_scaled_nvfp4=row_scaled_nvfp4,
         nvfp4_use_4over6=nvfp4_use_4over6,
         nvfp4_e4m3_max=nvfp4_e4m3_max,
+        per_token=per_token,
     )
 
 
@@ -1056,6 +1103,7 @@ class _ViewFunc(torch.autograd.Function):
             row_scaled_nvfp4=tensor._row_scaled_nvfp4,
             nvfp4_use_4over6=tensor._nvfp4_use_4over6,
             nvfp4_e4m3_max=tensor._nvfp4_e4m3_max,
+            per_token=tensor._per_token,
         )
 
     @staticmethod
@@ -1102,6 +1150,7 @@ class _ViewFunc(torch.autograd.Function):
                 row_scaled_nvfp4=grad._row_scaled_nvfp4,
                 nvfp4_use_4over6=grad._nvfp4_use_4over6,
                 nvfp4_e4m3_max=grad._nvfp4_e4m3_max,
+                per_token=grad._per_token,
             )
             return dgrad, None
         return grad.view(ctx.shape), None
@@ -1190,6 +1239,7 @@ class _ReshapeFunc(torch.autograd.Function):
             row_scaled_nvfp4=tensor._row_scaled_nvfp4,
             nvfp4_use_4over6=tensor._nvfp4_use_4over6,
             nvfp4_e4m3_max=tensor._nvfp4_e4m3_max,
+            per_token=tensor._per_token,
         )
 
     @staticmethod
@@ -1236,6 +1286,7 @@ class _ReshapeFunc(torch.autograd.Function):
                 row_scaled_nvfp4=grad._row_scaled_nvfp4,
                 nvfp4_use_4over6=grad._nvfp4_use_4over6,
                 nvfp4_e4m3_max=grad._nvfp4_e4m3_max,
+                per_token=grad._per_token,
             )
             return dgrad, None
         return grad.view(ctx.shape), None
