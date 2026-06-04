@@ -473,8 +473,7 @@ __device__ __forceinline__ void colwise_scaling_per_token(
     const IType* __restrict__ sIn_ptr, fp4e2m1x2* __restrict__ sOut_tr_ptr,
     nvfp4_scale_t* __restrict__ sSFcolwise_ptr, const float* __restrict__ sColAmax,
     const int stage_Y, const int stage_X, const int buff_in, const int buff_out_tr,
-    PhiloxState& rng, uint4& random_uint4, int& rnd_idx,
-    const uint32_t random_sign_mask_t = 0u) {
+    PhiloxState& rng, uint4& random_uint4, int& rnd_idx, const uint32_t random_sign_mask_t = 0u) {
   const auto& sIn2x = *reinterpret_cast<const IType2x3D*>(sIn_ptr);
   auto& sOut_tr = *reinterpret_cast<OType2xt3D*>(sOut_tr_ptr);
   auto& sSFcolwise = *reinterpret_cast<ScalesTypeTr2D*>(sSFcolwise_ptr);
@@ -574,8 +573,8 @@ __device__ __forceinline__ void colwise_scaling_per_token(
           // 4 contiguous bf16 per quad -> uint64; dither via the bf16 SR cast.
           const float2 bs2 = make_float2(block_scale, block_scale);
           const uint64_t elts = *reinterpret_cast<const uint64_t*>(&rIn[w][4 * e]);
-          qu[e] = ptx::mul_cvt_bf16_to_fp4_4x<true>(elts, bs2,
-                                                    get_rbits(rng, random_uint4, rnd_idx));
+          qu[e] =
+              ptx::mul_cvt_bf16_to_fp4_4x<true>(elts, bs2, get_rbits(rng, random_uint4, rnd_idx));
         } else {
           IType2 in01{rIn[w][4 * e + 0], rIn[w][4 * e + 1]};
           IType2 in23{rIn[w][4 * e + 2], rIn[w][4 * e + 3]};
@@ -882,27 +881,26 @@ inline void launch_grouped_fused_cast_bf16(const NVFP4PerTokenMultiArgs& args,
       TRANSFORMER_ENGINE_SWITCH_CONDITION(
           do_col, DO_COL,
           TRANSFORMER_ENGINE_SWITCH_CONDITION(
-              with_rht_effective, kWithRht,
-              TRANSFORMER_ENGINE_SWITCH_CONDITION(with_sr, kWithSr, {
+              with_rht_effective, kWithRht, TRANSFORMER_ENGINE_SWITCH_CONDITION(with_sr, kWithSr, {
                 constexpr int sz_in = DIVUP_TO_MULTIPLE(
                     BUFFS_NUM * BUFF_IN_SIZE * sizeof(FusedIType), TMA_SHMEM_ALIGNMENT);
                 constexpr int sz_out_r =
                     DO_ROW ? DIVUP_TO_MULTIPLE(BUFFS_NUM_OUT * BUFF_OUT_SIZE, TMA_SHMEM_ALIGNMENT)
                            : 0;
                 constexpr int sz_out_c =
-                    DO_COL
-                        ? DIVUP_TO_MULTIPLE(BUFFS_NUM_OUT_TR * BUFF_OUT_TR_SIZE, TMA_SHMEM_ALIGNMENT)
-                        : 0;
-                constexpr int sz_sf_r =
-                    DO_ROW ? DIVUP_TO_MULTIPLE(
-                                 CHUNK_DIM_Y * SCALES_PER_CHUNK_X * sizeof(nvfp4_scale_t),
-                                 TMA_SHMEM_ALIGNMENT)
+                    DO_COL ? DIVUP_TO_MULTIPLE(BUFFS_NUM_OUT_TR * BUFF_OUT_TR_SIZE,
+                                               TMA_SHMEM_ALIGNMENT)
                            : 0;
-                constexpr int sz_sf_c =
-                    DO_COL ? DIVUP_TO_MULTIPLE(
-                                 CHUNK_DIM_X * SCALES_PER_CHUNK_Y * sizeof(nvfp4_scale_t),
-                                 TMA_SHMEM_ALIGNMENT)
-                           : 0;
+                constexpr int sz_sf_r = DO_ROW
+                                            ? DIVUP_TO_MULTIPLE(CHUNK_DIM_Y * SCALES_PER_CHUNK_X *
+                                                                    sizeof(nvfp4_scale_t),
+                                                                TMA_SHMEM_ALIGNMENT)
+                                            : 0;
+                constexpr int sz_sf_c = DO_COL
+                                            ? DIVUP_TO_MULTIPLE(CHUNK_DIM_X * SCALES_PER_CHUNK_Y *
+                                                                    sizeof(nvfp4_scale_t),
+                                                                TMA_SHMEM_ALIGNMENT)
+                                            : 0;
                 constexpr int dshmem_size =
                     sz_in + sz_out_r + sz_out_c + sz_sf_r + sz_sf_c + TMA_SHMEM_ALIGNMENT;
                 auto kernel = group_per_token_fused_cast_kernel<DO_ROW, DO_COL, kWithRht, kWithSr>;
